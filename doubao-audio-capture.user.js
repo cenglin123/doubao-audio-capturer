@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         网页音频捕获与合并
+// @name         豆包网页版音频捕获与合并
 // @namespace    http://tampermonkey.net/
 // @version      1.0.0
 // @description  捕获豆包网页版中的音频数据，支持直接下载、合并下载多个音频
@@ -14,8 +14,9 @@
 // @grant        GM_download
 // @grant        unsafeWindow
 // @require      https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.0/lame.min.js
-// @updateURL    https://github.com/[您的用户名]/[仓库名]/raw/main/doubao-audio-capture.user.js
-// @downloadURL  https://github.com/[您的用户名]/[仓库名]/raw/main/doubao-audio-capture.user.js
+// @updateURL    https://github.com/cenglin123/doubao-audio-capturer/raw/main/doubao-audio-capture.user.js
+// @downloadURL  https://github.com/cenglin123/doubao-audio-capturer/raw/main/doubao-audio-capture.user.js
+// @license MIT
 // ==/UserScript==
 
 (function() {
