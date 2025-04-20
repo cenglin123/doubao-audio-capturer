@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆包网页版音频捕获与合并
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
+// @version      1.0.1
 // @description  捕获豆包网页版中的音频数据，支持直接下载、合并下载多个音频
 // @author       cenglin123
 // @match        https://www.doubao.com/*
