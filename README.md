@@ -21,7 +21,7 @@
 ### 方式一：从GreasyFork安装
 
 1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 或其他用户脚本管理器
-2. 前往 [GreasyFork页面](https://greasyfork.org/scripts/[脚本ID]) 安装脚本
+2. 前往 [GreasyFork页面](https://greasyfork.org/scripts/533430) 安装脚本
 
 ### 方式二：从GitHub安装
 
