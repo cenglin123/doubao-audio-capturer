@@ -29,9 +29,7 @@
 
 ### 方式二：从GitHub安装
 - 安装 Tampermonkey 或其他用户脚本管理器
-- 点击此仓库中的 [doubao-audio-capture.user.js](https://github.com/cenglin123/doubao-audio-capturer/blob/main/doubao-audio-capture.user.js) 文件
-- 点击 "Raw" 按钮查看源代码
-- Tampermonkey 会自动提示安装
+- 点击安装 [doubao-audio-capture.user.js](https://github.com/cenglin123/doubao-audio-capturer/raw/refs/heads/main/doubao-audio-capture.user.js) 文件
 
 ## 🚀 快速使用指南
 
