@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆包音频下载助手
 // @namespace    http://tampermonkey.net/
-// @version      2.0.1
+// @version      2.0.2
 // @description  捕获豆包网页版中的音频数据，支持主动/被动捕获、自动合并、暗黑模式、可拖拽面板
 // @author       cenglin123
 // @match        https://www.doubao.com/*
@@ -437,6 +437,14 @@
                 e.stopPropagation();
                 isMinimized = !isMinimized;
                 GM_setValue('isMinimized', isMinimized);
+
+                // 获取当前面板的位置
+                const rect = panel.getBoundingClientRect();
+                const currentPosition = {
+                    bottom: window.innerHeight - rect.bottom,
+                    right: window.innerWidth - rect.right
+                };
+                panelPosition = currentPosition;
                 createMainInterface();
             });
             
@@ -1969,8 +1977,7 @@
     });
     GM_registerMenuCommand('📍 重置面板位置', function() {
         const defaultPosition = { bottom: 20, right: 20 };
-        panelPosition = defaultPosition;
-        GM_setValue('panelPosition', defaultPosition);
+        panelPosition = defaultPosition;  // 只临时修改当前值，不保存到存储
         const panel = document.getElementById('audio-capture-panel');
         if (panel) {
             panel.remove();
