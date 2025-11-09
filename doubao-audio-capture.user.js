@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆包音频下载助手
 // @namespace    http://tampermonkey.net/
-// @version      2.0.0
+// @version      2.0.1
 // @description  捕获豆包网页版中的音频数据，支持主动/被动捕获、自动合并、暗黑模式、可拖拽面板
 // @author       cenglin123
 // @match        https://www.doubao.com/*
@@ -145,17 +145,19 @@
             return {
                 background: '#1e1e1e', color: '#e0e0e0', border: '#444',
                 buttonBg: '#2d2d2d', buttonHover: '#3d3d3d',
-                primaryBg: '#0d7377', primaryHover: '#14b8a6',
-                dangerBg: '#b91c1c', shadowColor: 'rgba(0,0,0,0.5)',
-                disabledBg: '#374151', disabledColor: '#6b7280'
+                primaryBg: '#5B8DEF', primaryHover: '#4A7DD9',
+                dangerBg: '#E57373', shadowColor: 'rgba(0,0,0,0.5)',
+                disabledBg: '#374151', disabledColor: '#6b7280',
+                successBg: '#66BB6A', successHover: '#57AB5A'
             };
         } else {
             return {
-                background: '#ffffff', color: '#333', border: '#ccc',
-                buttonBg: '#f0f0f0', buttonHover: '#e0e0e0',
-                primaryBg: '#4285f4', primaryHover: '#357ae8',
-                dangerBg: '#db4437', shadowColor: 'rgba(0,0,0,0.2)',
-                disabledBg: '#f3f4f6', disabledColor: '#9ca3af'
+                background: '#ffffff', color: '#333', border: '#e5e7eb',  // 更浅的边框
+                buttonBg: '#f8f9fa', buttonHover: '#e9ecef',                // 更浅的背景
+                primaryBg: '#5B8DEF', primaryHover: '#4A7DD9',
+                dangerBg: '#EF5350', shadowColor: 'rgba(0,0,0,0.08)',       // 更浅的阴影
+                disabledBg: '#f3f4f6', disabledColor: '#9ca3af',
+                successBg: '#66BB6A', successHover: '#57AB5A'
             };
         }
     }
@@ -279,11 +281,32 @@
             
             console.log('面板样式已设置，当前主题:', isDarkMode ? '暗色' : '亮色');
 
-            const headerHtml = `
+                const headerHtml = `
                 <div id="panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: ${isMinimized ? '0' : '16px'}; user-select: none;">
+                    ${isMinimized ? `
+                    <div style="display: flex; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <button id="active-capture-btn" class="icon-btn" title="一键获取" style="padding: 8px; background: none; border: none; cursor: pointer; opacity: 0.7; transition: all 0.2s; display: flex; align-items: center;">${icons.mic}</button>
+                            <button id="passive-capture-btn" class="icon-btn" title="手动获取" style="padding: 8px; background: none; border: none; cursor: pointer; opacity: 0.7; transition: all 0.2s; display: flex; align-items: center;">${icons.clock}</button>
+                            <button id="view-captured" class="icon-btn" title="已捕获列表" style="padding: 8px; background: none; border: none; cursor: pointer; opacity: 0.7; transition: all 0.2s; display: flex; align-items: center; position: relative;">
+                            ${icons.eye}
+                            <div class="audio-count-badge" style="position: absolute; top: 2px; right: 2px; background: ${theme.primaryBg}; color: white; border-radius: 8px; padding: 1px 4px; font-size: 10px; line-height: 1; min-width: 14px; text-align: center;">0</div>
+                        </button>
+                            <button id="merge-download" class="icon-btn" title="合并下载" style="padding: 8px; background: none; border: none; cursor: pointer; opacity: 0.7; transition: all 0.2s; display: flex; align-items: center;">${icons.download}</button>
+                            <button id="clear-all-audio" class="icon-btn" title="清空列表" style="padding: 8px; background: none; border: none; cursor: pointer; opacity: 0.7; transition: all 0.2s; display: flex; align-items: center;">${icons.trash}</button>
+                        </div>
+                        <div style="width: 1px; height: 20px; background: ${theme.border}; margin: 0 8px;"></div>
+                        <style>
+                            .icon-btn:hover { opacity: 1 !important; transform: scale(1.1); }
+                            .icon-btn:active { transform: scale(0.95); }
+                            .icon-btn svg { width: 20px; height: 20px; }
+                        </style>
+                    </div>
+                    ` : `
                     <h3 style="margin: 0; font-size: 16px; font-weight: 600; user-select: none; display: flex; align-items: center; gap: 8px;">
-                        ${icons.music} <span>豆包音频捕获</span>
+                        ${icons.music} <span>豆包音频下载助手</span>
                     </h3>
+                    `}
                     <div style="display: flex; gap: 8px;">
                         <button id="minimize-toggle" style="background: none; border: none; cursor: pointer; opacity: 0.7; transition: opacity 0.2s; padding: 4px; display: flex; align-items: center;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">
                             ${isMinimized ? icons.maximize : icons.minimize}
@@ -293,84 +316,98 @@
                         </button>
                     </div>
                 </div>
-            `;
-
+            `;            
+            
+            // 主内容区域
             const mainContent = isMinimized ? '' : `
                 <div style="display: flex; flex-direction: column; gap: 12px;">
                     
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                         <button id="active-capture-btn" style="
-                            padding: 14px; background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-                            color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: 500;
+                            padding: 14px; background: ${theme.successBg};
+                            color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 15px; font-weight: 500;
                             display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s;
-                            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
-                        " onmouseover="this.style.transform='translateY(-1px)';" onmouseout="this.style.transform='translateY(0)';">
-                            ${icons.mic} <span>一键获取</span>
+                            box-shadow: 0 2px 6px ${isDarkMode ? 'rgba(102, 187, 106, 0.25)' : 'rgba(102, 187, 106, 0.15)'};
+                        ">
+                            <div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                ${icons.mic} <span>一键获取</span>
+                            </div>
                         </button>
                         <button id="passive-capture-btn" style="
-                            padding: 14px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-                            color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: 500;
+                            padding: 14px; background: ${theme.primaryBg};
+                            color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 15px; font-weight: 500;
                             display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s;
-                            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
-                        " onmouseover="this.style.transform='translateY(-1px)';" onmouseout="this.style.transform='translateY(0)';">
-                            ${icons.clock} <span>手动获取</span>
+                            box-shadow: 0 2px 6px ${isDarkMode ? 'rgba(91, 141, 239, 0.25)' : 'rgba(91, 141, 239, 0.15)'};
+                        ">
+                            <div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                ${icons.clock} <span>手动获取</span>
+                            </div>
                         </button>
                     </div>
 
                     <div style="margin-bottom: 4px;">
                         <label style="display: block; font-size: 13px; color: ${isDarkMode ? '#9ca3af' : '#6b7280'}; margin-bottom: 6px;">文件名前缀</label>
                         <input type="text" id="filename-prefix" value="${fileNamePrefix}" placeholder="doubao_audio"
-                               style="width: 100%; padding: 10px 12px; background: ${isDarkMode ? '#374151' : '#f3f4f6'}; color: ${theme.color}; border: 1px solid ${isDarkMode ? '#4b5563' : '#e5e7eb'}; border-radius: 6px; font-size: 14px; box-sizing: border-box; transition: all 0.2s;"
-                               onfocus="this.style.borderColor='#3b82f6'; this.style.background='${isDarkMode ? '#1f2937' : '#ffffff'}'"
-                               onblur="this.style.borderColor='${isDarkMode ? '#4b5563' : '#e5e7eb'}'; this.style.background='${isDarkMode ? '#374151' : '#f3f4f6'}'">
+                            style="width: 100%; padding: 10px 12px; background: ${isDarkMode ? '#374151' : '#f3f4f6'}; color: ${theme.color}; border: 1px solid ${isDarkMode ? '#4b5563' : '#e5e7eb'}; border-radius: 6px; font-size: 14px; box-sizing: border-box; transition: all 0.2s;"
+                            onfocus="this.style.borderColor='#3b82f6'; this.style.background='${isDarkMode ? '#1f2937' : '#ffffff'}'"
+                            onblur="this.style.borderColor='${isDarkMode ? '#4b5563' : '#e5e7eb'}'; this.style.background='${isDarkMode ? '#374151' : '#f3f4f6'}'">
                     </div>
 
-                    <label style="display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: ${isDarkMode ? '#374151' : '#f3f4f6'}; border-radius: 6px; cursor: pointer; user-select: none; transition: background 0.2s;" onmouseover="this.style.background='${isDarkMode ? '#4b5563' : '#e5e7eb'}'" onmouseout="this.style.background='${isDarkMode ? '#374151' : '#f3f4f6'}'">
-                        <input type="checkbox" id="auto-merge-toggle" ${autoMergeEnabled ? 'checked' : ''} style="cursor: pointer; width: 16px; height: 16px;">
-                        <span style="font-size: 14px; flex: 1;">5秒无新音频时自动合并下载</span>
-                    </label>
-                    
-                    <label style="display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: ${isDarkMode ? '#374151' : '#f3f4f6'}; border-radius: 6px; cursor: pointer; user-select: none; transition: background 0.2s;" onmouseover="this.style.background='${isDarkMode ? '#4b5563' : '#e5e7eb'}'" onmouseout="this.style.background='${isDarkMode ? '#374151' : '#f3f4f6'}'">
-                        <input type="checkbox" id="auto-clear-toggle" ${autoClearList ? 'checked' : ''} style="cursor: pointer; width: 16px; height: 16px;">
-                        <span style="font-size: 14px; flex: 1;">下载完成后自动清空列表</span>
-                    </label>
+                    <div style="margin: -4px 0;">
+                        <div style="padding: 4px 10px; cursor: default;">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; padding: 4px 0;" onmouseover="this.style.background='${theme.buttonHover}'" onmouseout="this.style.background='transparent'">
+                                <input type="checkbox" id="auto-merge-toggle" ${autoMergeEnabled ? 'checked' : ''} style="cursor: pointer; width: 16px; height: 16px;">
+                                <span style="font-size: 14px; flex: 1;">自动合并下载(5秒无新音频时)</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; padding: 4px 0;" onmouseover="this.style.background='${theme.buttonHover}'" onmouseout="this.style.background='transparent'">
+                                <input type="checkbox" id="auto-clear-toggle" ${autoClearList ? 'checked' : ''} style="cursor: pointer; width: 16px; height: 16px;">
+                                <span style="font-size: 14px; flex: 1;">下载完成后自动清空列表</span>
+                            </label>
+                        </div>
+                    </div>
 
-                    <div style="display: flex; gap: 8px;">
-                        <button id="view-captured" style="
-                            flex: 1; padding: 10px; background: ${isDarkMode ? '#374151' : '#f3f4f6'}; color: ${theme.color};
+                    <div style="display: flex; gap: 4px; margin: 4px 0;">
+                        <button id="merge-download" style="
+                            flex: 1; padding: 8px; background: ${isDarkMode ? '#374151' : '#f3f4f6'}; color: ${theme.color};
                             border: 1px solid ${isDarkMode ? '#4b5563' : '#e5e7eb'}; border-radius: 6px; cursor: pointer; font-size: 13px;
                             display: flex; flex-direction: column; align-items: center; gap: 4px; transition: all 0.2s;
                         " onmouseover="this.style.transform='scale(1.02)'; this.style.background='${isDarkMode ? '#4b5563' : '#e5e7eb'}'" onmouseout="this.style.transform='scale(1)'; this.style.background='${isDarkMode ? '#374151' : '#f3f4f6'}'">
-                            <span style="font-size: 20px;">${icons.eye}</span>
-                            <span style="font-weight: 500;">已捕获 <span id="audio-count">0</span></span>
+                            <span style="font-size: 20px;">${icons.download}</span>
+                            <span style="font-weight: 500;">合并下载</span>
                         </button>
                     </div>
 
-                    <button id="merge-download" style="
-                        padding: 14px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; border-radius: 8px;
-                        cursor: pointer; font-size: 15px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 8px;
-                        transition: all 0.2s; box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
-                    " onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 12px rgba(59, 130, 246, 0.4)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(59, 130, 246, 0.3)'">
-                        ${icons.download} <span>合并下载</span>
-                    </button>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+                        <button id="view-captured" style="
+                            padding: 8px; background: ${theme.buttonBg}; color: ${theme.color}; 
+                            border: 1px solid ${theme.border}; border-radius: 8px;
+                            cursor: pointer; font-size: 14px; font-weight: 600; 
+                            display: flex; align-items: center; justify-content: center; gap: 8px;
+                            transition: all 0.2s;
+                        " onmouseover="this.style.background='${theme.buttonHover}'" onmouseout="this.style.background='${theme.buttonBg}'">
+                            ${icons.eye} <span>已捕获 <span id="audio-count">0</span></span>
+                        </button>
 
-                    <button id="clear-all-audio" style="
-                        padding: 12px; background: ${isDarkMode ? '#374151' : 'white'}; color: #ef4444; border: 1px solid ${isDarkMode ? '#4b5563' : '#fecaca'};
-                        border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 8px;
-                        transition: all 0.2s;
-                    " onmouseover="this.style.background='${isDarkMode ? '#4b5563' : '#fee2e2'}'" onmouseout="this.style.background='${isDarkMode ? '#374151' : 'white'}'">
-                        ${icons.trash} <span>清空列表</span>
-                    </button>
+                        <button id="clear-all-audio" style="
+                            padding: 8px; background: ${theme.buttonBg}; color: ${theme.color}; 
+                            border: 1px solid ${theme.border}; border-radius: 8px;
+                            cursor: pointer; font-size: 14px; font-weight: 600; 
+                            display: flex; align-items: center; justify-content: center; gap: 8px;
+                            transition: all 0.2s;
+                        " onmouseover="this.style.background='${theme.buttonHover}'" onmouseout="this.style.background='${theme.buttonBg}'">
+                            ${icons.trash} <span>清空列表</span>
+                        </button>
+                    </div>
 
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 1px;">
                         <button id="direct-download" style="
-                            padding: 10px; background: ${isDarkMode ? '#374151' : 'white'}; color: ${theme.color}; border: 1px solid ${isDarkMode ? '#4b5563' : '#e5e7eb'};
+                            padding: 6px; background: ${isDarkMode ? '#374151' : 'white'}; color: ${theme.color}; border: 1px solid ${isDarkMode ? '#4b5563' : '#e5e7eb'};
                             border-radius: 6px; cursor: pointer; font-size: 13px; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px;
                         " onmouseover="this.style.background='${isDarkMode ? '#4b5563' : '#f3f4f6'}'" onmouseout="this.style.background='${isDarkMode ? '#374151' : 'white'}'">
                             ${icons.link} <span>解析URL</span>
                         </button>
                         <button id="process-base64" style="
-                            padding: 10px; background: ${isDarkMode ? '#374151' : 'white'}; color: ${theme.color}; border: 1px solid ${isDarkMode ? '#4b5563' : '#e5e7eb'};
+                            padding: 6px; background: ${isDarkMode ? '#374151' : 'white'}; color: ${theme.color}; border: 1px solid ${isDarkMode ? '#4b5563' : '#e5e7eb'};
                             border-radius: 6px; cursor: pointer; font-size: 13px; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px;
                         " onmouseover="this.style.background='${isDarkMode ? '#4b5563' : '#f3f4f6'}'" onmouseout="this.style.background='${isDarkMode ? '#374151' : 'white'}'">
                             ${icons.code} <span>处理Base64</span>
@@ -408,12 +445,24 @@
                 panel.remove();
             });
 
-            if (!isMinimized) {
-                
-                // 按钮逻辑
-                document.getElementById('active-capture-btn').addEventListener('click', handleActiveClick);
-                document.getElementById('passive-capture-btn').addEventListener('click', handlePassiveClick);
+            // 按钮事件监听 (不管是否最小化都需要)
+            document.getElementById('active-capture-btn').addEventListener('click', handleActiveClick);
+            document.getElementById('passive-capture-btn').addEventListener('click', handlePassiveClick);
+            document.getElementById('view-captured').addEventListener('click', (e) => { e.stopPropagation(); showCapturedAudioList(); });
+            document.getElementById('merge-download').addEventListener('click', (e) => { e.stopPropagation(); showMergeOptions(); });
+            document.getElementById('clear-all-audio').addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (capturedAudio.length === 0) {
+                    updateStatus('当前没有已捕获的音频');
+                    return;
+                }
+                capturedAudio = [];
+                updateAudioCount();
+                saveAudioData();
+                updateStatus('已清空所有音频');
+            });
 
+            if (!isMinimized) {
                 // 文件名前缀保存
                 document.getElementById('filename-prefix').addEventListener('change', function(e) {
                     e.stopPropagation();
@@ -520,11 +569,11 @@
         }
     }
 
-    // 【修正2】统一的停止操作，添加参数区分主动/被动模式
+    // 统一的停止操作，添加参数区分主动/被动模式
     function stopCaptureActions(isActiveMode) {
         stopMonitoring();
         if (isActiveMode) {
-            unmutePageAudio(true); // 传入 true 表示需要点击停止按钮
+            unmutePageAudio(true);  // 传入 true 表示需要点击停止按钮
         } else {
             unmutePageAudio(false); // 传入 false 表示不需要点击按钮
         }
@@ -542,57 +591,73 @@
         
         // 默认样式
         const styles = {
-            green: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-            blue: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-            red: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+            green: theme.successBg,     // 纯色
+            blue: theme.primaryBg,      // 纯色
+            red: '#EF5350',           // 更柔和的红色
             gray: theme.disabledBg,
-            shadowGreen: '0 2px 8px rgba(16, 185, 129, 0.3)',
-            shadowBlue: '0 2px 8px rgba(59, 130, 246, 0.3)',
-            shadowRed: '0 2px 8px rgba(239, 68, 68, 0.3)',
+            shadowGreen: `0 2px 6px ${isDarkMode ? 'rgba(102, 187, 106, 0.25)' : 'rgba(102, 187, 106, 0.15)'}`,
+            shadowBlue: `0 2px 6px ${isDarkMode ? 'rgba(91, 141, 239, 0.25)' : 'rgba(91, 141, 239, 0.15)'}`,
+            shadowRed: `0 2px 6px ${isDarkMode ? 'rgba(239, 83, 80, 0.25)' : 'rgba(239, 83, 80, 0.15)'}`,
             shadowGray: 'none'
         };
 
         if (!isMonitoring) {
             // 状态: OFF
-            activeBtn.innerHTML = `${icons.mic} <span>一键获取</span>`;
+            activeBtn.innerHTML = `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.mic} <span>一键获取</span></div>`;
             activeBtn.style.background = styles.green;
             activeBtn.style.boxShadow = styles.shadowGreen;
             activeBtn.style.color = 'white';
+            activeBtn.style.transform = 'translateY(0)';
             activeBtn.disabled = false;
+            activeBtn.onmouseover = () => { activeBtn.style.transform = 'translateY(-1px)'; activeBtn.style.background = styles.green; };
+            activeBtn.onmouseout = () => { activeBtn.style.transform = 'translateY(0)'; activeBtn.style.background = styles.green; };
 
-            passiveBtn.innerHTML = `${icons.clock} <span>手动获取</span>`;
+            passiveBtn.innerHTML = `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.clock} <span>手动获取</span></div>`;
             passiveBtn.style.background = styles.blue;
             passiveBtn.style.boxShadow = styles.shadowBlue;
             passiveBtn.style.color = 'white';
+            passiveBtn.style.transform = 'translateY(0)';
             passiveBtn.disabled = false;
+            passiveBtn.onmouseover = () => { passiveBtn.style.transform = 'translateY(-1px)'; passiveBtn.style.background = styles.blue; };
+            passiveBtn.onmouseout = () => { passiveBtn.style.transform = 'translateY(0)'; passiveBtn.style.background = styles.blue; };
 
         } else if (isCapturing) {
             // 状态: ACTIVE (一键获取中)
-            activeBtn.innerHTML = `${icons.stop} <span>停止获取</span>`;
+            activeBtn.innerHTML = `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.stop} <span>停止获取</span></div>`;
             activeBtn.style.background = styles.red;
             activeBtn.style.boxShadow = styles.shadowRed;
             activeBtn.style.color = 'white';
+            activeBtn.style.transform = 'translateY(0)';
             activeBtn.disabled = false;
+            activeBtn.onmouseover = () => { activeBtn.style.transform = 'translateY(-1px)'; activeBtn.style.background = styles.red; };
+            activeBtn.onmouseout = () => { activeBtn.style.transform = 'translateY(0)'; activeBtn.style.background = styles.red; };
 
-            passiveBtn.innerHTML = `${icons.clock} <span>手动获取</span>`;
+            passiveBtn.innerHTML = `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.clock} <span>手动获取</span></div>`;
             passiveBtn.style.background = styles.gray;
             passiveBtn.style.boxShadow = styles.shadowGray;
             passiveBtn.style.color = theme.disabledColor;
             passiveBtn.disabled = true;
+            passiveBtn.onmouseover = null;
+            passiveBtn.onmouseout = null;
 
         } else {
             // 状态: PASSIVE (手动监控中)
-            activeBtn.innerHTML = `${icons.mic} <span>一键获取</span>`;
+            activeBtn.innerHTML = `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.mic} <span>一键获取</span></div>`;
             activeBtn.style.background = styles.gray;
             activeBtn.style.boxShadow = styles.shadowGray;
             activeBtn.style.color = theme.disabledColor;
             activeBtn.disabled = true;
+            activeBtn.onmouseover = null;
+            activeBtn.onmouseout = null;
 
-            passiveBtn.innerHTML = `${icons.stop} <span>停止监控</span>`;
+            passiveBtn.innerHTML = `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.stop} <span>停止监控</span></div>`;
             passiveBtn.style.background = styles.red;
             passiveBtn.style.boxShadow = styles.shadowRed;
             passiveBtn.style.color = 'white';
+            passiveBtn.style.transform = 'translateY(0)';
             passiveBtn.disabled = false;
+            passiveBtn.onmouseover = () => { passiveBtn.style.transform = 'translateY(-1px)'; passiveBtn.style.background = styles.red; };
+            passiveBtn.onmouseout = () => { passiveBtn.style.transform = 'translateY(0)'; passiveBtn.style.background = styles.red; };
         }
     }
 
@@ -781,8 +846,13 @@
 
     // 更新音频计数
     function updateAudioCount() {
+        // 更新展开模式的计数
         const countElement = document.getElementById('audio-count');
         if (countElement) countElement.textContent = capturedAudio.length;
+        
+        // 更新最小化模式的计数气泡
+        const countBadge = document.querySelector('.audio-count-badge');
+        if (countBadge) countBadge.textContent = capturedAudio.length;
     }
 
     // 开始监控网络请求
@@ -1294,7 +1364,6 @@
             }
         }
         // 移除 playAudio 函数
-        // function playAudio(id) { ... }
         function removeAudio(id) {
             const index = capturedAudio.findIndex(a => a.id === id);
             if (index !== -1) {
@@ -1315,8 +1384,8 @@
         const theme = getThemeStyles();
         const content = document.createElement('div');
         content.innerHTML = `
-            <div style="background: ${isDarkMode ? '#1f2937' : '#f3f4f6'}; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
-                <div style="font-size: 14px; color: ${theme.color}; margin-bottom: 4px;">
+            <div style="background: ${isDarkMode ? '#1f2937' : '#f3f4f6'}; padding: 16px; border-radius: 8px; margin-bottom: 8px;">
+                <div style="font-size: 14px; color: ${theme.color}; margin-bottom: 2px;">
                     📦 当前有 <strong style="color: ${theme.primaryBg};">${capturedAudio.length}</strong> 个已捕获的音频
                 </div>
                 <div style="font-size: 12px; color: ${isDarkMode ? '#9ca3af' : '#6b7280'};">
@@ -1324,7 +1393,7 @@
                 </div>
             </div>
             
-            <div style="margin-bottom: 16px;">
+            <div style="margin-bottom: 8px;">
                 <label style="display: block; font-size: 13px; color: ${isDarkMode ? '#9ca3af' : '#6b7280'}; margin-bottom: 8px; font-weight: 500;">
                     合并范围
                 </label>
@@ -1334,12 +1403,20 @@
                         border: 1px solid ${theme.border}; border-radius: 6px; font-size: 14px; transition: all 0.2s;"
                         onfocus="this.style.borderColor='#3b82f6'; this.style.background='${isDarkMode ? '#1f2937' : '#ffffff'}'"
                         onblur="this.style.borderColor='${theme.border}'; this.style.background='${theme.buttonBg}'">
-                    <button id="select-all-btn" style="padding: 10px 16px; background: ${theme.primaryBg}; color: white; 
-                        border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s; white-space: nowrap;
-                        display: flex; align-items: center; justify-content: center; gap: 6px;"
-                        onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
-                        ${icons.check} <span>全选</span>
-                    </button>
+                    <div style="display: flex; gap: 8px;">
+                        <button id="select-all-btn" style="padding: 10px 16px; background: ${theme.primaryBg}; color: white; 
+                            border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s; white-space: nowrap;
+                            display: flex; align-items: center; justify-content: center; gap: 6px;"
+                            onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+                            ${icons.check} <span>全选</span>
+                        </button>
+                        <button id="unselect-all-btn" style="padding: 10px 16px; background: ${theme.buttonBg}; color: ${theme.color}; 
+                            border: 1px solid ${theme.border}; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s; white-space: nowrap;
+                            display: flex; align-items: center; justify-content: center; gap: 6px;"
+                            onmouseover="this.style.background='${theme.buttonHover}'" onmouseout="this.style.background='${theme.buttonBg}'">
+                            <span>全不选</span>
+                        </button>
+                    </div>
                 </div>
                 <div style="font-size: 11px; color: ${isDarkMode ? '#6b7280' : '#9ca3af'}; margin-top: 6px; padding-left: 4px;">
                     💡 范围格式: 单个数字(如5)、范围(如1-5)或组合(如1-3,5,7-9)
@@ -1373,13 +1450,13 @@
                     onmouseover="this.style.background='${theme.buttonHover}'" onmouseout="this.style.background='${theme.buttonBg}'">
                     取消
                 </button>
-                <button id="start-merge" style="padding: 10px 20px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
+                <button id="start-merge" style="padding: 10px 20px; background: ${theme.successBg}; 
                     color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; 
-                    transition: all 0.2s; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+                    transition: all 0.2s; box-shadow: 0 2px 6px ${isDarkMode ? 'rgba(102, 187, 106, 0.25)' : 'rgba(102, 187, 106, 0.15)'};
                     display: flex; align-items: center; justify-content: center; gap: 8px;"
-                    onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 12px rgba(16, 185, 129, 0.4)'"
-                    onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(16, 185, 129, 0.3)'">
-                    ${icons.download} <span>开始合并</span>
+                    onmouseover="this.style.transform='translateY(-1px)'; this.style.background='${theme.successHover}'; this.style.boxShadow='0 4px 10px ${isDarkMode ? 'rgba(102, 187, 106, 0.3)' : 'rgba(102, 187, 106, 0.2)'}'"
+                    onmouseout="this.style.transform='translateY(0)'; this.style.background='${theme.successBg}'; this.style.boxShadow='0 2px 6px ${isDarkMode ? 'rgba(102, 187, 106, 0.25)' : 'rgba(102, 187, 106, 0.15)'}'">
+                    ${icons.download} <span>合并下载</span>
                 </button>
             </div>
         `;
@@ -1431,6 +1508,10 @@
         document.getElementById('select-all-btn').addEventListener('click', () => {
             document.getElementById('merge-range').value = `1-${capturedAudio.length}`;
             document.querySelectorAll('.merge-select').forEach(cb => { cb.checked = true; });
+        });
+        document.getElementById('unselect-all-btn').addEventListener('click', () => {
+            document.getElementById('merge-range').value = '';
+            document.querySelectorAll('.merge-select').forEach(cb => { cb.checked = false; });
         });
 
         const rangeInput = document.getElementById('merge-range');
@@ -1628,42 +1709,140 @@
         });
     }
 
-    // 合并音频缓冲区 (目前仅支持MP3快速拼接，因为WAV文件的体积会非常大)
+    // 合并音频缓冲区
     async function mergeAudioBuffers(audioBuffers, format) {
         return new Promise(async (resolve, reject) => {
             try {
-                if (format !== 'mp3') {
-                    reject(new Error("目前仅支持MP3格式的快速合并。"));
-                    return;
-                }
-
-                updateMergeStatus('正在直接合并MP3文件...');
-                const validMp3Buffers = [];
-                for (let i = 0; i < audioBuffers.length; i++) {
-                    const buffer = audioBuffers[i];
-                    if (isValidMp3(buffer)) {
-                        validMp3Buffers.push(buffer);
-                    } else {
-                        console.warn(`跳过第${i+1}个非MP3格式文件`);
+                if (format === 'mp3') {
+                    // MP3 快速合并
+                    updateMergeStatus('正在直接合并MP3文件...');
+                    const validMp3Buffers = [];
+                    for (let i = 0; i < audioBuffers.length; i++) {
+                        const buffer = audioBuffers[i];
+                        if (isValidMp3(buffer)) {
+                            validMp3Buffers.push(buffer);
+                        } else {
+                            console.warn(`跳过第${i+1}个非MP3格式文件`);
+                        }
+                        updateMergeProgress(60 + Math.floor((i / audioBuffers.length) * 30), `正在处理第 ${i + 1}/${audioBuffers.length} 个文件...`);
                     }
-                    updateMergeProgress(60 + Math.floor((i / audioBuffers.length) * 30), `正在处理第 ${i + 1}/${audioBuffers.length} 个文件...`);
-                }
 
-                if (validMp3Buffers.length === 0) {
-                    reject(new Error('没有有效的MP3文件可以合并')); return;
-                }
+                    if (validMp3Buffers.length === 0) {
+                        reject(new Error('没有有效的MP3文件可以合并')); return;
+                    }
 
-                updateMergeStatus(`正在合并 ${validMp3Buffers.length} 个MP3文件...`);
-                const totalLength = validMp3Buffers.reduce((total, buffer) => total + buffer.byteLength, 0);
-                const mergedMp3 = new Uint8Array(totalLength);
-                let offset = 0;
-                for (const buffer of validMp3Buffers) {
-                    const data = new Uint8Array(buffer);
-                    mergedMp3.set(data, offset);
-                    offset += buffer.byteLength;
+                    updateMergeStatus(`正在合并 ${validMp3Buffers.length} 个MP3文件...`);
+                    const totalLength = validMp3Buffers.reduce((total, buffer) => total + buffer.byteLength, 0);
+                    const mergedMp3 = new Uint8Array(totalLength);
+                    let offset = 0;
+                    for (const buffer of validMp3Buffers) {
+                        const data = new Uint8Array(buffer);
+                        mergedMp3.set(data, offset);
+                        offset += buffer.byteLength;
+                    }
+                    updateMergeProgress(95, '合并完成，准备下载...');
+                    resolve(mergedMp3.buffer);
+
+                } else if (format === 'wav') {
+                    // WAV 合并处理
+                    updateMergeStatus('正在合并 WAV 文件...');
+
+                    // WAV 头部参数
+                    const RIFF = 0x46464952;
+                    const WAVE = 0x45564157;
+                    const fmt  = 0x20746D66;
+                    const data = 0x61746164;
+                    
+                    let totalDataSize = 0;
+                    let sampleRate = 0;
+                    let channels = 0;
+                    let bitsPerSample = 0;
+
+                    // 第一次遍历，获取音频参数和总数据大小
+                    for (let i = 0; i < audioBuffers.length; i++) {
+                        const buffer = audioBuffers[i];
+                        const view = new DataView(buffer);
+
+                        // 检查WAV文件头
+                        if (view.getUint32(0, false) !== RIFF || view.getUint32(8, false) !== WAVE) {
+                            continue;
+                        }
+
+                        // 获取音频参数（使用第一个有效WAV的参数）
+                        if (!sampleRate) {
+                            channels = view.getUint16(22, true);
+                            sampleRate = view.getUint32(24, true);
+                            bitsPerSample = view.getUint16(34, true);
+                        }
+
+                        // 找到数据块
+                        let offset = 12;
+                        while (offset < buffer.byteLength) {
+                            const chunkId = view.getUint32(offset, false);
+                            const chunkSize = view.getUint32(offset + 4, true);
+                            if (chunkId === data) {
+                                totalDataSize += chunkSize;
+                                break;
+                            }
+                            offset += 8 + chunkSize;
+                        }
+                    }
+
+                    if (totalDataSize === 0 || !sampleRate) {
+                        reject(new Error('没有有效的WAV文件可以合并'));
+                        return;
+                    }
+
+                    // 创建合并后的WAV文件
+                    const headerLength = 44;
+                    const totalLength = headerLength + totalDataSize;
+                    const mergedBuffer = new ArrayBuffer(totalLength);
+                    const mergedView = new DataView(mergedBuffer);
+
+                    // 写入WAV头部
+                    mergedView.setUint32(0, RIFF, false);                    // RIFF标识
+                    mergedView.setUint32(4, totalLength - 8, true);         // 文件大小
+                    mergedView.setUint32(8, WAVE, false);                   // WAVE标识
+                    mergedView.setUint32(12, fmt, false);                   // fmt块标识
+                    mergedView.setUint32(16, 16, true);                     // fmt块大小
+                    mergedView.setUint16(20, 1, true);                      // 音频格式(PCM)
+                    mergedView.setUint16(22, channels, true);               // 通道数
+                    mergedView.setUint32(24, sampleRate, true);            // 采样率
+                    mergedView.setUint32(28, sampleRate * channels * bitsPerSample / 8, true); // 字节率
+                    mergedView.setUint16(32, channels * bitsPerSample / 8, true);             // 数据块对齐
+                    mergedView.setUint16(34, bitsPerSample, true);         // 采样位数
+                    mergedView.setUint32(36, data, false);                 // data块标识
+                    mergedView.setUint32(40, totalDataSize, true);         // 数据大小
+
+                    // 写入音频数据
+                    let dataOffset = headerLength;
+                    for (let i = 0; i < audioBuffers.length; i++) {
+                        const buffer = audioBuffers[i];
+                        const view = new DataView(buffer);
+                        
+                        // 找到数据块并复制
+                        let offset = 12;
+                        while (offset < buffer.byteLength) {
+                            const chunkId = view.getUint32(offset, false);
+                            const chunkSize = view.getUint32(offset + 4, true);
+                            if (chunkId === data) {
+                                const dataArray = new Uint8Array(buffer, offset + 8, chunkSize);
+                                new Uint8Array(mergedBuffer).set(dataArray, dataOffset);
+                                dataOffset += chunkSize;
+                                break;
+                            }
+                            offset += 8 + chunkSize;
+                        }
+
+                        updateMergeProgress(60 + Math.floor((i / audioBuffers.length) * 30), 
+                            `正在处理第 ${i + 1}/${audioBuffers.length} 个WAV文件...`);
+                    }
+
+                    updateMergeProgress(95, 'WAV合并完成，准备下载...');
+                    resolve(mergedBuffer);
+                } else {
+                    reject(new Error(`不支持 ${format} 格式的合并`));
                 }
-                updateMergeProgress(95, '合并完成，准备下载...');
-                resolve(mergedMp3.buffer);
             } catch (e) { reject(e); }
         });
     }
@@ -1722,8 +1901,21 @@
         titleElement.style.cssText = `
             margin: 0; padding: 20px 20px 15px 20px;
             border-bottom: 1px solid ${theme.border};
-            flex-shrink: 0; /* 防止标题被压缩 */
+            flex-shrink: 0; display: flex; justify-content: space-between; align-items: center;
         `;
+        
+        // 添加关闭按钮到标题右侧
+        const closeBtn = document.createElement('button');
+        closeBtn.innerHTML = icons.close;
+        closeBtn.style.cssText = `
+            background: none; border: none; padding: 4px;
+            cursor: pointer; opacity: 0.7; transition: opacity 0.2s;
+            display: flex; align-items: center;
+        `;
+        closeBtn.onmouseover = () => closeBtn.style.opacity = '1';
+        closeBtn.onmouseout = () => closeBtn.style.opacity = '0.7';
+        closeBtn.onclick = () => closeModal(contentWrapper);
+        titleElement.appendChild(closeBtn);
         
         // 创建一个可滚动的内容容器
         const contentWrapper = document.createElement('div');
@@ -1758,16 +1950,16 @@
     }
 
     // 注册GM菜单
-    GM_registerMenuCommand('🎵 打开音频捕获工具', createMainInterface);
-    GM_registerMenuCommand('▶️ 触发一键获取', function() {
+    GM_registerMenuCommand('🎵 打开音频下载窗口', createMainInterface);
+    GM_registerMenuCommand('▶️ 一键获取', function() {
         document.getElementById('active-capture-btn')?.click();
     });
-    GM_registerMenuCommand('⏱️ 触发手动获取', function() {
+    GM_registerMenuCommand('⏱️ 手动获取', function() {
         document.getElementById('passive-capture-btn')?.click();
     });
     GM_registerMenuCommand('📋 查看已捕获的音频', showCapturedAudioList);
     GM_registerMenuCommand('🔗 合并下载音频', showMergeOptions);
-    GM_registerMenuCommand('🤖 切换自动合并', function() {
+    GM_registerMenuCommand('🤖 切换是否自动合并', function() {
         autoMergeEnabled = !autoMergeEnabled;
         GM_setValue('autoMergeEnabled', autoMergeEnabled);
         // 同步UI中的checkbox
@@ -1787,7 +1979,7 @@
         alert('✅ 面板位置已重置到右下角');
     });
 
-    // 改进初始化，确保在各种情况下都能正确加载
+    // 初始化函数
     let isInitialized = false; // 添加初始化标记
     
     function initialize() {
