@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆包音频下载助手
 // @namespace    http://tampermonkey.net/
-// @version      2.0.2
+// @version      2.0.3
 // @description  捕获豆包网页版中的音频数据，支持主动/被动捕获、自动合并、暗黑模式、可拖拽面板
 // @author       cenglin123
 // @match        https://www.doubao.com/*
@@ -34,7 +34,7 @@
     let autoMergeEnabled = GM_getValue('autoMergeEnabled', false);
     let autoMergeTimer = null;
     let lastAudioCaptureTime = null;
-    const AUTO_MERGE_DELAY = 5000; // 5秒
+    const AUTO_MERGE_DELAY = 7000; // 7秒
 
     // 自动清空列表
     let autoClearList = GM_getValue('autoClearList', false);
@@ -91,6 +91,7 @@
 
     // SVG图标定义
     const icons = {
+        speaker: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>',
         mic: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>',
         stop: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>',
         eye: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>',
@@ -281,19 +282,21 @@
             
             console.log('面板样式已设置，当前主题:', isDarkMode ? '暗色' : '亮色');
 
+                // 最小化面版
                 const headerHtml = `
                 <div id="panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: ${isMinimized ? '0' : '16px'}; user-select: none;">
                     ${isMinimized ? `
                     <div style="display: flex; align-items: center;">
                         <div style="display: flex; align-items: center; gap: 4px;">
-                            <button id="active-capture-btn" class="icon-btn" title="一键获取" style="padding: 8px; background: none; border: none; cursor: pointer; opacity: 0.7; transition: all 0.2s; display: flex; align-items: center;">${icons.mic}</button>
-                            <button id="passive-capture-btn" class="icon-btn" title="手动获取" style="padding: 8px; background: none; border: none; cursor: pointer; opacity: 0.7; transition: all 0.2s; display: flex; align-items: center;">${icons.clock}</button>
-                            <button id="view-captured" class="icon-btn" title="已捕获列表" style="padding: 8px; background: none; border: none; cursor: pointer; opacity: 0.7; transition: all 0.2s; display: flex; align-items: center; position: relative;">
+                            <button id="active-capture-btn" class="icon-btn minimized-btn" title="一键获取" style="padding: 8px; background: transparent !important; border: none; cursor: pointer; opacity: 0.7; transition: all 0.2s; display: flex; align-items: center; color: inherit;">${icons.speaker}</button>
+                            <button id="passive-capture-btn" class="icon-btn minimized-btn" title="手动获取" style="padding: 8px; background: transparent !important; border: none; cursor: pointer; opacity: 0.7; transition: all 0.2s; display: flex; align-items: center; color: inherit;">${icons.clock}</button>
+                            <div style="width: 1px; height: 20px; background: ${theme.border}; margin: 0 8px;"></div>
+                            <button id="view-captured" class="icon-btn minimized-btn" title="已捕获列表" style="padding: 8px; background: transparent !important; border: none; cursor: pointer; opacity: 0.7; transition: all 0.2s; display: flex; align-items: center; position: relative; color: inherit;">
                             ${icons.eye}
                             <div class="audio-count-badge" style="position: absolute; top: 2px; right: 2px; background: ${theme.primaryBg}; color: white; border-radius: 8px; padding: 1px 4px; font-size: 10px; line-height: 1; min-width: 14px; text-align: center;">0</div>
                         </button>
-                            <button id="merge-download" class="icon-btn" title="合并下载" style="padding: 8px; background: none; border: none; cursor: pointer; opacity: 0.7; transition: all 0.2s; display: flex; align-items: center;">${icons.download}</button>
-                            <button id="clear-all-audio" class="icon-btn" title="清空列表" style="padding: 8px; background: none; border: none; cursor: pointer; opacity: 0.7; transition: all 0.2s; display: flex; align-items: center;">${icons.trash}</button>
+                            <button id="merge-download" class="icon-btn minimized-btn" title="合并下载" style="padding: 8px; background: transparent !important; border: none; cursor: pointer; opacity: 0.7; transition: all 0.2s; display: flex; align-items: center;">${icons.download}</button>
+                            <button id="clear-all-audio" class="icon-btn minimized-btn" title="清空列表" style="padding: 8px; background: transparent !important; border: none; cursor: pointer; opacity: 0.7; transition: all 0.2s; display: flex; align-items: center;">${icons.trash}</button>
                         </div>
                         <div style="width: 1px; height: 20px; background: ${theme.border}; margin: 0 8px;"></div>
                         <style>
@@ -330,7 +333,7 @@
                             box-shadow: 0 2px 6px ${isDarkMode ? 'rgba(102, 187, 106, 0.25)' : 'rgba(102, 187, 106, 0.15)'};
                         ">
                             <div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                                ${icons.mic} <span>一键获取</span>
+                                ${icons.speaker} <span>一键获取</span>
                             </div>
                         </button>
                         <button id="passive-capture-btn" style="
@@ -357,7 +360,7 @@
                         <div style="padding: 4px 10px; cursor: default;">
                             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; padding: 4px 0;" onmouseover="this.style.background='${theme.buttonHover}'" onmouseout="this.style.background='transparent'">
                                 <input type="checkbox" id="auto-merge-toggle" ${autoMergeEnabled ? 'checked' : ''} style="cursor: pointer; width: 16px; height: 16px;">
-                                <span style="font-size: 14px; flex: 1;">自动合并下载(5秒无新音频时)</span>
+                                <span style="font-size: 14px; flex: 1;">自动合并下载(7秒无新音频时)</span>
                             </label>
                             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; padding: 4px 0;" onmouseover="this.style.background='${theme.buttonHover}'" onmouseout="this.style.background='transparent'">
                                 <input type="checkbox" id="auto-clear-toggle" ${autoClearList ? 'checked' : ''} style="cursor: pointer; width: 16px; height: 16px;">
@@ -611,27 +614,46 @@
 
         if (!isMonitoring) {
             // 状态: OFF
-            activeBtn.innerHTML = `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.mic} <span>一键获取</span></div>`;
-            activeBtn.style.background = styles.green;
-            activeBtn.style.boxShadow = styles.shadowGreen;
-            activeBtn.style.color = 'white';
+            activeBtn.innerHTML = isMinimized ? icons.speaker : `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.speaker} <span>一键获取</span></div>`;
+            if (isMinimized) {
+                // 最小化模式下保持透明背景
+                activeBtn.style.background = 'transparent';
+                activeBtn.style.boxShadow = 'none';
+                activeBtn.style.color = 'inherit';
+            } else {
+                activeBtn.style.background = styles.green;
+                activeBtn.style.boxShadow = styles.shadowGreen;
+                activeBtn.style.color = 'white';
+            }
             activeBtn.style.transform = 'translateY(0)';
             activeBtn.disabled = false;
-            activeBtn.onmouseover = () => { activeBtn.style.transform = 'translateY(-1px)'; activeBtn.style.background = styles.green; };
-            activeBtn.onmouseout = () => { activeBtn.style.transform = 'translateY(0)'; activeBtn.style.background = styles.green; };
+            activeBtn.onmouseover = () => { activeBtn.style.transform = 'translateY(-1px)'; };
+            activeBtn.onmouseout = () => { activeBtn.style.transform = 'translateY(0)'; };
 
-            passiveBtn.innerHTML = `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.clock} <span>手动获取</span></div>`;
-            passiveBtn.style.background = styles.blue;
-            passiveBtn.style.boxShadow = styles.shadowBlue;
-            passiveBtn.style.color = 'white';
+            passiveBtn.innerHTML = isMinimized ? icons.clock : `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.clock} <span>手动获取</span></div>`;
+            if (isMinimized) {
+                // 最小化模式下保持透明背景
+                passiveBtn.style.background = 'transparent';
+                passiveBtn.style.boxShadow = 'none';
+                passiveBtn.style.color = 'inherit';
+            } else {
+                passiveBtn.style.background = styles.blue;
+                passiveBtn.style.boxShadow = styles.shadowBlue;
+                passiveBtn.style.color = 'white';
+            }
             passiveBtn.style.transform = 'translateY(0)';
             passiveBtn.disabled = false;
-            passiveBtn.onmouseover = () => { passiveBtn.style.transform = 'translateY(-1px)'; passiveBtn.style.background = styles.blue; };
-            passiveBtn.onmouseout = () => { passiveBtn.style.transform = 'translateY(0)'; passiveBtn.style.background = styles.blue; };
+            if (!isMonitoring) {
+                passiveBtn.onmouseover = () => { passiveBtn.style.transform = 'translateY(-1px)'; };
+                passiveBtn.onmouseout = () => { passiveBtn.style.transform = 'translateY(0)'; };
+            } else {
+                passiveBtn.onmouseover = null;
+                passiveBtn.onmouseout = null;
+            }
 
         } else if (isCapturing) {
             // 状态: ACTIVE (一键获取中)
-            activeBtn.innerHTML = `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.stop} <span>停止获取</span></div>`;
+            activeBtn.innerHTML = isMinimized ? icons.stop : `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.stop} <span>停止获取</span></div>`;
             activeBtn.style.background = styles.red;
             activeBtn.style.boxShadow = styles.shadowRed;
             activeBtn.style.color = 'white';
@@ -640,7 +662,7 @@
             activeBtn.onmouseover = () => { activeBtn.style.transform = 'translateY(-1px)'; activeBtn.style.background = styles.red; };
             activeBtn.onmouseout = () => { activeBtn.style.transform = 'translateY(0)'; activeBtn.style.background = styles.red; };
 
-            passiveBtn.innerHTML = `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.clock} <span>手动获取</span></div>`;
+            passiveBtn.innerHTML = isMinimized ? icons.clock : `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.clock} <span>手动获取</span></div>`;
             passiveBtn.style.background = styles.gray;
             passiveBtn.style.boxShadow = styles.shadowGray;
             passiveBtn.style.color = theme.disabledColor;
@@ -650,7 +672,7 @@
 
         } else {
             // 状态: PASSIVE (手动监控中)
-            activeBtn.innerHTML = `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.mic} <span>一键获取</span></div>`;
+            activeBtn.innerHTML = isMinimized ? icons.speaker : `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.speaker} <span>一键获取</span></div>`;
             activeBtn.style.background = styles.gray;
             activeBtn.style.boxShadow = styles.shadowGray;
             activeBtn.style.color = theme.disabledColor;
@@ -658,7 +680,7 @@
             activeBtn.onmouseover = null;
             activeBtn.onmouseout = null;
 
-            passiveBtn.innerHTML = `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.stop} <span>停止监控</span></div>`;
+            passiveBtn.innerHTML = isMinimized ? icons.stop : `<div style="pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px;">${icons.stop} <span>停止监控</span></div>`;
             passiveBtn.style.background = styles.red;
             passiveBtn.style.boxShadow = styles.shadowRed;
             passiveBtn.style.color = 'white';
