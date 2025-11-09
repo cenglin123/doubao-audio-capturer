@@ -1265,8 +1265,13 @@
     function scanNodeForDataUrls(node) {
         if (!node) return;
 
-        // 如果是元素节点，检查其属性
-        if (node.nodeType === Node.ELEMENT_NODE) {
+        // Shadow DOM支持
+        if (node.shadowRoot) {
+            scanNodeForDataUrls(node.shadowRoot);
+        }
+
+        // 如果是元素节点或文档片段，检查其属性
+        if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
             // 检查常见的包含 URL 的属性
             const attributes = ['src', 'href', 'data-src', 'data-url', 'data-audio'];
             attributes.forEach(attr => {
@@ -1322,6 +1327,16 @@
             document.querySelectorAll('audio, video').forEach(node => {
                 if (node.src && node.src.startsWith('data:')) {
                     scanNodeForDataUrls(node);
+                }
+            });
+            document.querySelectorAll('iframe').forEach(frame => {
+                try {
+                    const doc = frame.contentDocument || frame.contentWindow?.document;
+                    if (doc) {
+                        scanNodeForDataUrls(doc.body);
+                    }
+                } catch (err) {
+                    // 跨域iframe会抛错，忽略
                 }
             });
         } catch (e) {
