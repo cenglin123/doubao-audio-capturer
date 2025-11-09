@@ -37,7 +37,11 @@
     const AUTO_MERGE_DELAY = 7000; // 7秒
 
     // 自动清空列表
-    let autoClearList = GM_getValue('autoClearList', false);
+    let autoClearList = GM_getValue('autoClearList');
+    if (autoClearList === undefined) {
+        autoClearList = true;
+        GM_setValue('autoClearList', true);
+    }
 
     // 暗黑模式检测
     let isDarkMode = false;
