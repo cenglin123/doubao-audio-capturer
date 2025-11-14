@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆包音频下载助手
 // @namespace    http://tampermonkey.net/
-// @version      2.0.4
+// @version      2.0.5
 // @description  捕获豆包网页版中的音频数据，支持主动/被动捕获、自动合并、暗黑模式、可拖拽面板、音频排序管理
 // @author       cenglin123
 // @match        https://www.doubao.com/*
@@ -34,7 +34,7 @@
     let autoMergeEnabled = GM_getValue('autoMergeEnabled', false);
     let autoMergeTimer = null;
     let lastAudioCaptureTime = null;
-    const AUTO_MERGE_DELAY = 7000; // 7秒
+    const AUTO_MERGE_DELAY = 10000; // 10秒
 
     // 自动清空列表
     let autoClearList = GM_getValue('autoClearList');
@@ -389,7 +389,7 @@
                         <div style="padding: 4px 10px; cursor: default;">
                             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; padding: 4px 0;" onmouseover="this.style.background='${theme.buttonHover}'" onmouseout="this.style.background='transparent'">
                                 <input type="checkbox" id="auto-merge-toggle" ${autoMergeEnabled ? 'checked' : ''} style="cursor: pointer; width: 16px; height: 16px;">
-                                <span style="font-size: 14px; flex: 1;">自动合并下载(7秒无新音频时)</span>
+                                <span style="font-size: 14px; flex: 1;">自动合并下载(10秒无新音频时)</span>
                             </label>
                             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; padding: 4px 0;" onmouseover="this.style.background='${theme.buttonHover}'" onmouseout="this.style.background='transparent'">
                                 <input type="checkbox" id="auto-clear-toggle" ${autoClearList ? 'checked' : ''} style="cursor: pointer; width: 16px; height: 16px;">
