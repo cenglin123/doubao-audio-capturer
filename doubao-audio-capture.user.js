@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆包音频下载助手
 // @namespace    http://tampermonkey.net/
-// @version      2.0.5
+// @version      2.0.6
 // @description  捕获豆包网页版中的音频数据，支持主动/被动捕获、自动合并、暗黑模式、可拖拽面板、音频排序管理
 // @author       cenglin123
 // @match        https://www.doubao.com/*
@@ -481,6 +481,7 @@
                     updateStatus('当前没有已捕获的音频');
                     return;
                 }
+                capturedAudio.forEach(item => revokeAudioBlobUrl(item));
                 capturedAudio = [];
                 updateAudioCount();
                 saveAudioData();
@@ -507,6 +508,7 @@
                         updateStatus('当前没有已捕获的音频');
                         return;
                     }
+                    capturedAudio.forEach(item => revokeAudioBlobUrl(item));
                     capturedAudio = [];
                     updateAudioCount();
                     saveAudioData();
@@ -1023,7 +1025,7 @@
                 if (!isMonitoring) return; // 检查是否仍在监控
                 try {
                     const contentType = this.getResponseHeader('Content-Type') || '';
-                    const isAudio = contentType.includes('audio') || contentType.includes('octet-stream') || (this.url && this.url.match(/\.(mp3|wav|ogg|aac|flac|m4a)($|\?)/i));
+                    const isAudio = !contentType.includes('wasm') && (contentType.includes('audio') || contentType.includes('octet-stream') || (this.url && this.url.match(/\.(mp3|wav|ogg|aac|flac|m4a)($|\?)/i)));
                     if (isAudio) {
                         captureAudioFromResponse(this.response, contentType, this.url);
                     }
@@ -1038,7 +1040,7 @@
                 if (!isMonitoring) return response; // 检查是否仍在监控
                 try {
                     const contentType = response.headers.get('Content-Type') || '';
-                    const isAudio = contentType.includes('audio') || contentType.includes('octet-stream') || (url && url.match(/\.(mp3|wav|ogg|aac|flac|m4a)($|\?)/i));
+                    const isAudio = !contentType.includes('wasm') && (contentType.includes('audio') || contentType.includes('octet-stream') || (url && url.match(/\.(mp3|wav|ogg|aac|flac|m4a)($|\?)/i)));
                     if (isAudio) {
                         response.clone().arrayBuffer().then(buffer => {
                             captureAudioFromResponse(buffer, contentType, url);
@@ -1141,6 +1143,7 @@
 
         // 启动定期扫描（每500ms扫描一次新的 data URL）
         startDataUrlScanning();
+
     }
 
     // 启动定期扫描 data URL
@@ -1174,12 +1177,27 @@
             observer = null;
         }
         stopDataUrlScanning(); // 停止定期扫描
+        // restoreWebAudioHooks() 不再在 stopMonitoring 中调用；
+        // Web Audio hook 已改为在脚本初始化时永久安装，仅通过 isMonitoring 门控
     }
 
     // 从响应捕获音频
     function captureAudioFromResponse(response, contentType, url) {
         if (!isMonitoring) return; // 最终检查
         if (capturedAudio.some(audio => audio.url === url)) return;
+
+        // 过滤 WASM 二进制数据
+        if (response instanceof ArrayBuffer && isWasmBinary(response)) {
+            console.log('跳过 WASM 二进制数据 (非音频):', getShortUrl(url));
+            return;
+        }
+
+        // 过滤 Content-Type 为 application/wasm 的响应
+        if (contentType && contentType.includes('wasm')) {
+            console.log('跳过 WASM Content-Type:', contentType, getShortUrl(url));
+            return;
+        }
+
         const audioItem = {
             id: generateId(), source: 'network', url: url, contentType: contentType,
             timestamp: new Date().toISOString(), data: response,
@@ -1195,9 +1213,22 @@
     }
 
     // 从媒体元素捕获音频
+    // 注意: 媒体元素的 src 如果是 blob: URL，此时无法直接检查其二进制内容。
+    // WASM 过滤推迟到 getAudioBuffer() → isValidMp3() 阶段执行，
+    // isValidMp3() 会调用 isWasmBinary() 拒绝 WASM 数据。
     function captureAudioFromMediaElement(mediaElement) {
         if (!isMonitoring) return; // 最终检查
         if (capturedAudio.some(audio => audio.url === mediaElement.src)) return;
+
+        // 对非 blob URL 做基本的音频 MIME 模式检查
+        const src = mediaElement.src;
+        if (src && !src.startsWith('blob:') && !src.startsWith('data:')) {
+            const hasAudioExtension = /\.(mp3|wav|ogg|aac|flac|m4a|webm|oga)($|\?)/i.test(src);
+            if (!hasAudioExtension) {
+                console.warn('captureAudioFromMediaElement: 媒体元素 src 无已知音频扩展名, 可能为非音频数据:', getShortUrl(src));
+            }
+        }
+
         const audioItem = {
             id: generateId(), source: 'media', url: mediaElement.src, contentType: 'audio/media',
             timestamp: new Date().toISOString(), mediaElement: mediaElement,
@@ -1246,6 +1277,9 @@
     }
 
     // 保存音频数据
+    // 注意: blob: URL 不可序列化，序列化时会自动丢弃 url 字段。
+    // Web Audio capture 的 blob URL 在页面重载后丢失其 backing data，
+    // 因此依赖持久化存储的 audioItem 在页面重载后将不可用。
     function saveAudioData() {
         try {
             const serializedData = capturedAudio.map(({ id, source, url, contentType, timestamp, format, size }) =>
@@ -1361,6 +1395,11 @@
         audio.onerror = () => {
             try {
                 fetch(dataUrl).then(r => r.arrayBuffer()).then(buffer => {
+                    // 排除 WASM 二进制数据 (data:application/octet-stream;base64 可能是 WASM)
+                    if (isWasmBinary(buffer)) {
+                        console.log('validateAudioDataUrl: 跳过 WASM 二进制数据 (非音频)');
+                        return;
+                    }
                     if (checkAudioSignature(buffer)) callback();
                 });
             } catch (e) {}
@@ -1418,6 +1457,109 @@
             const text = new TextDecoder('utf-8').decode(new Uint8Array(buffer.slice(0, 100)));
             return text.includes('Lavf') || text.includes('matroska') || text.includes('webm');
         } catch (e) { return false; }
+    }
+
+    // 检测是否为 WASM 二进制数据
+    const WASM_MAGIC = [0x00, 0x61, 0x73, 0x6d]; // "\0asm"
+
+    function isWasmBinary(buffer) {
+        if (!buffer || buffer.byteLength < 4) return false;
+        try {
+            let view;
+            if (buffer instanceof ArrayBuffer) {
+                view = new Uint8Array(buffer, 0, 4);
+            } else if (buffer instanceof Uint8Array) {
+                view = buffer.length >= 4 ? buffer.subarray(0, 4) : new Uint8Array(buffer.buffer, buffer.byteOffset, 4);
+            } else {
+                return false;
+            }
+            return view[0] === WASM_MAGIC[0] && view[1] === WASM_MAGIC[1] &&
+                   view[2] === WASM_MAGIC[2] && view[3] === WASM_MAGIC[3];
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // 撤销 Blob URL，防止内存泄漏
+    function revokeAudioBlobUrl(audioItem) {
+        if (audioItem && audioItem.url && audioItem.url.startsWith('blob:')) {
+            try {
+                URL.revokeObjectURL(audioItem.url);
+            } catch (e) {
+                console.warn('撤销 Blob URL 失败:', e);
+            }
+        }
+    }
+
+    // Web Audio API Hook 相关
+    let origDecodeAudioData = null;
+
+    function setupWebAudioHooks() {
+        try {
+            const AudioContextClass = unsafeWindow.AudioContext || unsafeWindow.webkitAudioContext;
+            if (!AudioContextClass || origDecodeAudioData) return;
+
+            origDecodeAudioData = AudioContextClass.prototype.decodeAudioData;
+
+            AudioContextClass.prototype.decodeAudioData = function(arrayBuffer, ...args) {
+                // 捕获传入的原始音频 ArrayBuffer
+                if (isMonitoring && arrayBuffer && arrayBuffer.byteLength > 0 && !isWasmBinary(arrayBuffer)) {
+                    try {
+                        // 去重：通过大小和时间窗口避免重复捕获
+                        const now = Date.now();
+                        const existingRecent = capturedAudio.some(a =>
+                            a._webAudioSize === arrayBuffer.byteLength &&
+                            a._webAudioTime && (now - a._webAudioTime) < 2000
+                        );
+                        if (!existingRecent) {
+                            const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
+                            const blobUrl = URL.createObjectURL(blob);
+                            const audioItem = {
+                                id: generateId(),
+                                source: 'webAudio',
+                                url: blobUrl,
+                                contentType: 'audio/mpeg',
+                                timestamp: new Date().toISOString(),
+                                data: arrayBuffer.slice(0),
+                                format: guessAudioFormat('audio/mpeg', null),
+                                size: arrayBuffer.byteLength,
+                                _webAudioSize: arrayBuffer.byteLength,
+                                _webAudioTime: now
+                            };
+                            capturedAudio.push(audioItem);
+                            lastAudioCaptureTime = now;
+                            updateAudioCount();
+                            saveAudioData();
+                            updateStatus('🎵 Web Audio 捕获: ' + (arrayBuffer.byteLength / 1024).toFixed(1) + ' KB');
+                            resetAutoMergeTimer();
+                        }
+                    } catch (e) {
+                        console.error('Web Audio API 音频捕获失败:', e);
+                    }
+                }
+                // 调用原始方法（兼容 callback 和 Promise 两种形式）
+                return origDecodeAudioData.apply(this, [arrayBuffer, ...args]);
+            };
+
+            console.log('Web Audio API hooks 已设置');
+        } catch (e) {
+            console.error('设置 Web Audio API hooks 失败:', e);
+        }
+    }
+
+    // 保留以备将来的清理场景使用（当前脚本生命周期内 Hook 永久安装，由 isMonitoring 门控）
+    function restoreWebAudioHooks() {
+        try {
+            if (!origDecodeAudioData) return;
+            const AudioContextClass = unsafeWindow.AudioContext || unsafeWindow.webkitAudioContext;
+            if (AudioContextClass) {
+                AudioContextClass.prototype.decodeAudioData = origDecodeAudioData;
+            }
+            origDecodeAudioData = null;
+            console.log('Web Audio API hooks 已恢复');
+        } catch (e) {
+            console.error('恢复 Web Audio API hooks 失败:', e);
+        }
     }
 
     // 从data URL解析
@@ -1804,6 +1946,7 @@
 
         // 清空列表（无确认）
         document.getElementById('clear-all').addEventListener('click', function() {
+            capturedAudio.forEach(item => revokeAudioBlobUrl(item));
             capturedAudio = [];
             updateAudioCount();
             saveAudioData();
@@ -2119,6 +2262,7 @@
         function removeAudio(id) {
             const index = capturedAudio.findIndex(a => a.id === id);
             if (index !== -1) {
+                revokeAudioBlobUrl(capturedAudio[index]);
                 capturedAudio.splice(index, 1);
                 updateAudioCount();
                 saveAudioData();
@@ -2315,6 +2459,7 @@
 
             let statusMsg = `已成功合并 ${audioBuffers.length} 个音频文件并下载`;
             if (autoClearList) {
+                capturedAudio.forEach(item => revokeAudioBlobUrl(item));
                 capturedAudio = [];
                 updateAudioCount();
                 saveAudioData();
@@ -2513,6 +2658,8 @@
     // 简单检查是否为有效的MP3文件
     function isValidMp3(buffer) {
         if (!buffer || buffer.byteLength < 3) return false;
+        // 排除 WASM 二进制数据
+        if (isWasmBinary(buffer)) return false;
         const view = new Uint8Array(buffer);
         if (view[0] === 0x49 && view[1] === 0x44 && view[2] === 0x33) return true;
         for (let i = 0; i < Math.min(100, view.length - 1); i++) {
@@ -2670,6 +2817,10 @@
             console.log('当前document.readyState:', document.readyState);
 
             loadAudioData();
+
+            // 在脚本初始化时即安装 Web Audio API Hook，避免 race condition。
+            // hook 体内部通过 isMonitoring 门控，仅在监控开启时捕获。
+            setupWebAudioHooks();
 
             // 根据当前页面加载状态决定如何初始化
             const initUI = () => {
