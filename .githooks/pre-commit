@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -e
+python scripts/agent_links.py check || {
+    echo ""
+    echo "AGENTS.md / CLAUDE.md / GEMINI.md 内容不一致。"
+    echo "正确流程：仅编辑 AGENTS.md，然后运行 python scripts/agent_links.py repair。"
+    exit 1
+}

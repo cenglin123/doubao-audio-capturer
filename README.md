@@ -97,3 +97,11 @@ A: 可通过 GM 菜单选择“重置面板位置”将面板重置到右下角�
 ## 贡献
 
 欢迎提交 Issue 或 Pull Request 来改进此脚本。
+
+## AI Agent 协作
+
+本项目使用 [agent-first 文档体系](AGENTS.md) 支持 AI Agent（如 Claude Code）协作开发。关键文件：
+
+- **[AGENTS.md](AGENTS.md)** — AI 协作规范（行为规则、信息导航、完工检查清单）
+- **[CHANGELOG.md](CHANGELOG.md)** — 变更记录
+- **[docs/CURRENT.md](docs/CURRENT.md)** — 当前任务状态
