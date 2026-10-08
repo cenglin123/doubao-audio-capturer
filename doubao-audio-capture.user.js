@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆包音频下载助手
 // @namespace    http://tampermonkey.net/
-// @version      2.0.9
+// @version      2.1.0
 // @description  捕获豆包网页版中的音频数据，支持主动/被动捕获、自动合并、暗黑模式、可拖拽面板、音频排序管理
 // @author       cenglin123
 // @match        https://www.doubao.com/*
@@ -32,6 +32,7 @@
 
     // 自动合并相关
     let autoMergeEnabled = GM_getValue('autoMergeEnabled', false);
+    let autoMergeEnabledPrev = null;   // 主动捕获前的用户偏好, 停止捕获时还原
     let autoMergeTimer = null;
     let lastAudioCaptureTime = null;
     const AUTO_MERGE_DELAY = 10000; // 10秒
@@ -247,13 +248,18 @@
     }
 
     // 自动点击页面播放/停止按钮
-    function clickAudioToggleButton() {
+    // stopOnly=true 时只在播放进行中(存在停止按钮)时点击, 避免把已结束的播放重新触发成播放
+    function clickAudioToggleButton(stopOnly = false) {
         try {
             const stopBtn = document.querySelector('button[data-testid="audio_stop_button"]');
             if (stopBtn && !stopBtn.disabled) {
                 stopBtn.click();
                 updateStatus('✓ 已触发停止按钮');
                 return true;
+            }
+            if (stopOnly) {
+                updateStatus('播放已结束, 无需停止');
+                return false;
             }
             const playBtn = document.querySelector('button[data-testid="audio_play_button"]');
             if (playBtn && !playBtn.disabled) {
@@ -573,13 +579,14 @@
             startMonitoring();
             mutePageAudio();
 
-            // 自动勾选"自动合并"
+            // 自动勾选"自动合并" (仅本次捕获会话生效, 停止时还原用户偏好,
+            // 否则会永久开启自动合并, 导致之后手动捕获的条目被自动合并清空)
             const autoMergeCheckbox = document.getElementById('auto-merge-toggle');
             if (autoMergeCheckbox) {
                 autoMergeCheckbox.checked = true;
             }
+            autoMergeEnabledPrev = GM_getValue('autoMergeEnabled', false);
             autoMergeEnabled = true;
-            GM_setValue('autoMergeEnabled', autoMergeEnabled);
 
             setTimeout(clickAudioToggleButton, 500);
             updateStatus('一键获取已启动，已静音');
@@ -612,6 +619,14 @@
             unmutePageAudio(true);
         } else {
             unmutePageAudio(false);
+        }
+        // 还原主动捕获前的自动合并偏好
+        if (autoMergeEnabledPrev !== null) {
+            autoMergeEnabled = autoMergeEnabledPrev;
+            autoMergeEnabledPrev = null;
+            GM_setValue('autoMergeEnabled', autoMergeEnabled);
+            const checkbox = document.getElementById('auto-merge-toggle');
+            if (checkbox) checkbox.checked = autoMergeEnabled;
         }
         isCapturing = false;
         updateCaptureUI(); // 确保这里被调用
@@ -844,7 +859,7 @@
         });
     }
 
-    // 页面静音 (不太好用，后续继续开发)
+    // 页面静音
     function mutePageAudio() {
         if (muteInterval) clearInterval(muteInterval);
 
@@ -862,16 +877,8 @@
         muteAllElements();
         muteInterval = setInterval(muteAllElements, 500);
 
-        if (window.AudioContext || window.webkitAudioContext) {
-            try {
-                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                if (audioContext.state === 'running') {
-                    audioContext.suspend();
-                }
-            } catch (e) {
-                console.log('无法静音AudioContext:', e);
-            }
-        }
+        // Web Audio 播放的静音由 tap hook 在主动捕获时把音源重定向到静音增益节点实现
+        // (页面自己的 AudioContext 无法通过新建一个本地 Context 再 suspend 来静音)
     }
 
     // 解除静音并可选择性停止播放
@@ -889,20 +896,12 @@
             element.pause();
         });
 
-        if (window.AudioContext || window.webkitAudioContext) {
-            try {
-                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                if (audioContext.state === 'suspended') {
-                    audioContext.resume();
-                }
-            } catch (e) {
-                console.log('无法恢复AudioContext:', e);
-            }
-        }
+        // 恢复被主动捕获重定向的 Web Audio 播放
+        unmuteWebAudioRedirect();
 
-        // 只有在主动模式下才点击停止按钮
+        // 只有在主动模式下才点击停止按钮 (仅停止进行中的播放, 不会把已结束的播放再次触发)
         if (shouldClickButton) {
-            clickAudioToggleButton();
+            clickAudioToggleButton(true);
             updateStatus('已恢复页面音频并暂停播放');
         } else {
             updateStatus('已停止监控');
@@ -1579,6 +1578,7 @@
     let tapPollBuffer = null;        // RMS 轮询复用缓冲（tap 建立时按 fftSize 分配）
     let lastLoudTime = 0;            // 最近一次有声时刻
     let tapOrigConnect = null;       // 原始 AudioNode.connect
+    const tapMuteGains = new Map();  // 主动捕获的静音增益节点 (context -> GainNode[gain=0])
     const TAP_RMS_THRESHOLD = 0.01;  // 有声判定阈值
     const TAP_SILENCE_MS = 4000;     // 持续静音该时长则结束当前一段
     const TAP_POLL_INTERVAL = 300;   // RMS 轮询间隔
@@ -1608,6 +1608,20 @@
                             tapOrigConnect.call(this, tapDestNode);
                             tapOrigConnect.call(this, tapAnalyser);
                         }
+                    }
+                    // 主动捕获模式: 把音源到扬声器的连接重定向到静音增益节点,
+                    // 用户听不到声音但 tap 仍正常录制; 停止捕获时恢复增益
+                    if (isCapturing && isMonitoring && destination instanceof AudioDestinationNode &&
+                        !TAP_OWN_NODES.has(this)) {
+                        let muteGain = tapMuteGains.get(destination.context);
+                        if (!muteGain) {
+                            muteGain = destination.context.createGain();
+                            muteGain.gain.value = 0;
+                            TAP_OWN_NODES.add(muteGain);
+                            tapOrigConnect.call(muteGain, destination);
+                            tapMuteGains.set(destination.context, muteGain);
+                        }
+                        return tapOrigConnect.apply(this, [muteGain, ...rest]);
                     }
                 } catch (e) {
                     console.warn('Web Audio tap hook 出错:', e);
@@ -1730,6 +1744,14 @@
         } catch (e) {
             console.error('转换 Web Audio 播放捕获失败:', e);
         }
+    }
+
+    // 恢复被主动捕获重定向的 Web Audio 播放 (把静音增益节点恢复为 1)
+    function unmuteWebAudioRedirect() {
+        tapMuteGains.forEach((gainNode) => {
+            try { gainNode.gain.value = 1; } catch (e) { /* 忽略已关闭的 context */ }
+        });
+        tapMuteGains.clear();
     }
 
     // AudioBuffer → 16bit PCM WAV
@@ -2763,11 +2785,7 @@
 
             if (isAutoMerge && (isMonitoring && isCapturing)) { // 仅在主动模式下自动停止
                 setTimeout(() => {
-                    stopMonitoring();
-                    unmutePageAudio(true); // 主动模式，需要点击停止按钮
-                    isCapturing = false;
-                    isMonitoring = false;
-                    updateCaptureUI();
+                    stopCaptureActions(true);
                     updateStatus('✅ 自动合并完成，已停止获取');
                 }, 1000);
             }
