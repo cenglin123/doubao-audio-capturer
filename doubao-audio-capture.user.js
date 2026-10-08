@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆包音频下载助手
 // @namespace    http://tampermonkey.net/
-// @version      2.1.0
+// @version      2.1.1
 // @description  捕获豆包网页版中的音频数据，支持主动/被动捕获、自动合并、暗黑模式、可拖拽面板、音频排序管理
 // @author       cenglin123
 // @match        https://www.doubao.com/*
@@ -966,6 +966,10 @@
         if (isMonitoring) return; // 防止重复挂钩
         isMonitoring = true;
 
+        // 恢复监控时若 tap 已建立但录制器未运行, 立即在当前静音期补启
+        // (停止监控时 finalize 的重开被 isMonitoring 门控跳过, 需在此补上)
+        if (tapDestNode && !tapRecorder) startTapRecorder();
+
         // 拦截 Audio 和 Video 元素的 src 属性设置
         try {
             const AudioProto = unsafeWindow.HTMLAudioElement.prototype;
@@ -1635,7 +1639,9 @@
         }
     }
 
-    // 建立 tap 基础设施（分析器 + 录制目标）并开始 RMS 轮询; 真正的录制由"出现有声"触发
+    // 建立 tap 基础设施（分析器 + 录制目标）并开始 RMS 轮询
+    // 录制器在此刻(静音期)立即启动 —— 若等检测到有声再开录, 启动延迟会吃掉首音节
+    // (实测症状: "长城"听到"…城"), 先录后裁即可完整保留语音起始
     // 已知限制: 仅为首个出现的扬声器上下文建 tap; 页面更换 AudioContext 后的音源不会被录制
     function startTapMonitoring(ctx) {
         try {
@@ -1650,13 +1656,14 @@
             tapPollBuffer = new Float32Array(analyser.fftSize);
             lastLoudTime = 0;
             tapPollTimer = setInterval(tapPoll, TAP_POLL_INTERVAL);
+            startTapRecorder(); // 预启动: 在静音期把录制器准备好
             console.log('Web Audio 播放捕获 (tap) 已建立, 等待有声输入');
         } catch (e) {
             console.error('建立 Web Audio 播放捕获失败:', e);
         }
     }
 
-    // RMS 轮询: 有声则开录/刷新计时, 持续静音则切段
+    // RMS 轮询: 只负责静音检测切段（录制器常驻, 不由 RMS 触发启动）
     // 轮询常驻, 仅在监控开启时工作 —— 这样"停止再恢复监控"无需重建任何基础设施
     function tapPoll() {
         try {
@@ -1675,11 +1682,12 @@
             const now = Date.now();
             if (rms >= TAP_RMS_THRESHOLD) {
                 lastLoudTime = now;
+                // 兜底: 停止→恢复监控等场景下录制器可能未运行, 此时开录(起振可能略有损失)
                 if (!tapRecorder) startTapRecorder();
             }
             if (tapRecorder && lastLoudTime && now - lastLoudTime > TAP_SILENCE_MS) {
                 lastLoudTime = 0; // 防止 stop 异步生效期间重复触发
-                stopTapRecording(); // 结束当前一段（轮询继续, 下一段有声时自动开录）
+                stopTapRecording(); // 结束当前一段（finalize 后会在静音期内立即重开录制）
             }
         } catch (e) {
             console.error('Web Audio tap 轮询出错:', e);
@@ -1726,7 +1734,7 @@
         stopTapRecording(); // 触发最后一段收尾
     }
 
-    // 录制结束: webm → decodeAudioData → WAV → 进入捕获列表
+    // 录制结束: webm → decodeAudioData → 裁剪首尾静音 → WAV → 进入捕获列表
     // 注意: 不检查 isMonitoring, 因为 stopMonitoring 时最后一段仍需收尾。
     async function finalizeTapRecording(chunks) {
         if (!chunks || chunks.length === 0) return;
@@ -1738,11 +1746,54 @@
             const OAC = unsafeWindow.OfflineAudioContext || unsafeWindow.webkitOfflineAudioContext;
             const offCtx = new OAC(2, 1, 44100);
             const audioBuffer = await offCtx.decodeAudioData(arrayBuf);
-            if (!audioBuffer || audioBuffer.duration < 0.2) return;
-            const wavBuffer = encodeWavFromAudioBuffer(audioBuffer);
-            pushWebAudioTapItem(wavBuffer, audioBuffer.duration);
+            if (audioBuffer && audioBuffer.duration >= 0.2) {
+                const trimmed = trimAudioBufferSilence(audioBuffer, offCtx);
+                const wavBuffer = encodeWavFromAudioBuffer(trimmed);
+                pushWebAudioTapItem(wavBuffer, trimmed.duration);
+            }
         } catch (e) {
             console.error('转换 Web Audio 播放捕获失败:', e);
+        }
+        // 立即重开录制: 此刻仍处于静音期, 下一段语音的起始不会丢失
+        if (isMonitoring && tapDestNode) startTapRecorder();
+    }
+
+    // 裁剪 AudioBuffer 首尾静音 (保留 150ms 余量)
+    function trimAudioBufferSilence(audioBuffer, offCtx) {
+        try {
+            const sr = audioBuffer.sampleRate;
+            const win = Math.max(1, Math.floor(sr * 0.02));
+            const pad = Math.floor(sr * 0.15);
+            const chCount = audioBuffer.numberOfChannels;
+            const data = [];
+            for (let c = 0; c < chCount; c++) data.push(audioBuffer.getChannelData(c));
+            const winCount = Math.ceil(audioBuffer.length / win);
+            let firstWin = -1, lastWin = -1;
+            for (let w = 0; w < winCount; w++) {
+                let sum = 0, cnt = 0;
+                for (let c = 0; c < chCount; c++) {
+                    const d = data[c];
+                    for (let i = w * win, e = Math.min((w + 1) * win, d.length); i < e; i++) {
+                        sum += d[i] * d[i]; cnt++;
+                    }
+                }
+                if (Math.sqrt(sum / Math.max(1, cnt)) >= TAP_RMS_THRESHOLD) {
+                    if (firstWin < 0) firstWin = w;
+                    lastWin = w;
+                }
+            }
+            if (firstWin < 0) return audioBuffer; // 全静音, 交由调用方的时长过滤处理
+            const start = Math.max(0, firstWin * win - pad);
+            const end = Math.min(audioBuffer.length, (lastWin + 1) * win + pad);
+            if (start === 0 && end === audioBuffer.length) return audioBuffer;
+            const newBuf = offCtx.createBuffer(chCount, end - start, sr);
+            for (let c = 0; c < chCount; c++) {
+                newBuf.copyToChannel(data[c].subarray(start, end), c);
+            }
+            return newBuf;
+        } catch (e) {
+            console.error('裁剪静音失败:', e);
+            return audioBuffer;
         }
     }
 
