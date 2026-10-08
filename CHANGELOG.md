@@ -12,6 +12,12 @@
 #### 变更内容
 - 用户反馈 v2.0.7 未修复。经 converge 评议(R1)定位: 首版 tap 创建了录制目标但从未把页面音源接入, 录到的是空流。重写 tap 模块: hook AudioNode.connect 时把音源同时接入 MediaStreamAudioDestinationNode(录制)与 AnalyserNode(RMS 静音检测), 有声自动开录 MediaRecorder, 持续静音 4 秒按语句切段, 切段后 webm→decodeAudioData→16bit PCM WAV 进入统一管线。R2 修复停止再恢复监控后 tap 永久失效问题(轮询常驻由 isMonitoring 门控)。R3 零阻断收敛。真实豆包页面实测: 两次朗读正确切为两段(11.5s/11.1s)。
 
+### 修复播放捕获条目无法参与 MP3 合并的问题 (v2.0.9)
+
+#### 变更内容
+- 用户反馈 v2.0.8 合并报『没有有效的音频数据可合并』。原因: 播放捕获产出的条目是 WAV, 而合并默认目标格式为 MP3, startMergeProcess 的格式过滤把 WAV 条目全部丢弃。修复: 新增 isWavBuffer 与 convertWavBufferToMp3(lamejs 128kbps), 合并到 MP3 时自动将 WAV 条目转码后参与合并; 转 WAV 目标格式不受影响。已在 Node 与浏览器(同一 cdnjs lamejs/1.2.0)双环境验证转码输出为合法 MP3。
+
+
 
 ---
 

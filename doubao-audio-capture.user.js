@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆包音频下载助手
 // @namespace    http://tampermonkey.net/
-// @version      2.0.8
+// @version      2.0.9
 // @description  捕获豆包网页版中的音频数据，支持主动/被动捕获、自动合并、暗黑模式、可拖拽面板、音频排序管理
 // @author       cenglin123
 // @match        https://www.doubao.com/*
@@ -2638,6 +2638,68 @@
         }, 500);
     }
 
+    // 检测是否为 RIFF/WAVE (含 fmt 与 data 块)
+    function isWavBuffer(buffer) {
+        try {
+            if (!buffer || buffer.byteLength < 12) return false;
+            const view = new DataView(buffer);
+            return view.getUint32(0, false) === 0x52494646 && // 'RIFF'
+                   view.getUint32(8, false) === 0x57415645;   // 'WAVE'
+        } catch (e) { return false; }
+    }
+
+    // 将 16bit PCM WAV 转码为 MP3 (lamejs), 供合并流程处理播放捕获(tap)产生的 WAV 条目
+    function convertWavBufferToMp3(wavBuffer) {
+        try {
+            const view = new DataView(wavBuffer);
+            // 解析 RIFF/WAVE 头, 提取 fmt 参数与 data 块
+            let offset = 12, channels = 0, sampleRate = 0, bitsPerSample = 0, dataOffset = -1, dataSize = 0;
+            while (offset + 8 <= wavBuffer.byteLength) {
+                const id = view.getUint32(offset, false);
+                const size = view.getUint32(offset + 4, true);
+                if (id === 0x666D7420) { // 'fmt '
+                    channels = view.getUint16(offset + 10, true);
+                    sampleRate = view.getUint32(offset + 12, true);
+                    bitsPerSample = view.getUint16(offset + 22, true);
+                } else if (id === 0x64617461) { // 'data'
+                    dataOffset = offset + 8;
+                    dataSize = size;
+                    break;
+                }
+                offset += 8 + size + (size % 2);
+            }
+            if (!channels || !sampleRate || dataOffset < 0 || bitsPerSample !== 16) return null;
+            const numChannels = Math.min(channels, 2);
+            const samples = new Int16Array(wavBuffer, dataOffset, dataSize >> 1);
+            const frames = samples.length / channels;
+            const left = new Int16Array(frames);
+            const right = numChannels >= 2 ? new Int16Array(frames) : null;
+            for (let i = 0; i < frames; i++) {
+                left[i] = samples[i * channels];
+                if (right) right[i] = samples[i * channels + 1];
+            }
+            const encoder = new lamejs.Mp3Encoder(numChannels, sampleRate, 128);
+            const blockSize = 1152;
+            const parts = [];
+            for (let i = 0; i < frames; i += blockSize) {
+                const l = left.subarray(i, i + blockSize);
+                const chunk = right ? encoder.encodeBuffer(l, right.subarray(i, i + blockSize))
+                                    : encoder.encodeBuffer(l);
+                if (chunk.length > 0) parts.push(new Uint8Array(chunk));
+            }
+            const end = encoder.flush();
+            if (end.length > 0) parts.push(new Uint8Array(end));
+            const total = parts.reduce((s, p) => s + p.length, 0);
+            const out = new Uint8Array(total);
+            let o = 0;
+            for (const p of parts) { out.set(p, o); o += p.length; }
+            return out.buffer;
+        } catch (e) {
+            console.error('WAV 转 MP3 失败:', e);
+            return null;
+        }
+    }
+
     // 开始合并流程
     async function startMergeProcess(indices, format, modal, isAutoMerge = false) {
         try {
@@ -2650,7 +2712,14 @@
                 const audio = capturedAudio[index];
                 if (!audio) continue;
                 try {
-                    const buffer = await getAudioBuffer(audio);
+                    let buffer = await getAudioBuffer(audio);
+                    if (buffer && format === 'mp3' && !(audio.format === 'mp3' || isValidMp3(buffer))) {
+                        // 播放捕获(tap)等来源是 WAV, 用 lamejs 转码为 MP3 后参与合并
+                        if (isWavBuffer(buffer)) {
+                            const mp3Buffer = convertWavBufferToMp3(buffer);
+                            if (mp3Buffer) buffer = mp3Buffer;
+                        }
+                    }
                     if (buffer && (format !== 'mp3' || (audio.format === 'mp3' || isValidMp3(buffer)))) {
                         audioBuffers.push(buffer);
                     }
