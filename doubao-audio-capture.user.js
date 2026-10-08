@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆包音频下载助手
 // @namespace    http://tampermonkey.net/
-// @version      2.1.1
+// @version      2.1.2
 // @description  捕获豆包网页版中的音频数据，支持主动/被动捕获、自动合并、暗黑模式、可拖拽面板、音频排序管理
 // @author       cenglin123
 // @match        https://www.doubao.com/*
@@ -966,9 +966,12 @@
         if (isMonitoring) return; // 防止重复挂钩
         isMonitoring = true;
 
-        // 恢复监控时若 tap 已建立但录制器未运行, 立即在当前静音期补启
+        // 恢复监控时若已有 tap 会话但录制器未运行, 立即补启
         // (停止监控时 finalize 的重开被 isMonitoring 门控跳过, 需在此补上)
-        if (tapDestNode && !tapRecorder) startTapRecorder();
+        tapSessions.forEach((sess, ctx) => {
+            if (ctx.state === 'closed') return; // 已关闭的 Context 由轮询清理
+            if (!sess.recorder) startTapRecorder(sess);
+        });
 
         // 拦截 Audio 和 Video 元素的 src 属性设置
         try {
@@ -1574,13 +1577,10 @@
     // 出现有声才开录, 持续静音则结束当前一段; 停止后经 decodeAudioData 转为 WAV 进入统一管线。
     // 注意: 不能以 MediaRecorder 的 timeslice 分片节奏判断静音 —— 无论是否出声,
     // 浏览器都会按 start(1000) 的节奏持续产出分片, 分片驱动的"无活动计时"永远不会到期。
-    let tapDestNode = null;          // MediaStreamAudioDestinationNode（录制目标）
-    let tapAnalyser = null;          // AnalyserNode（RMS 静音检测）
-    let tapRecorder = null;          // 当前 MediaRecorder
-    let tapRecorderChunks = null;    // 当前录制分片（per-recorder, onstop 时移交 finalize）
+    // 豆包每段朗读可能新建 AudioContext, 因此 tap 状态按 Context 建立会话:
+    // sessions: AudioContext -> { destNode, analyser, pollBuffer, recorder, chunks, lastLoudTime }
+    const tapSessions = new Map();
     let tapPollTimer = null;         // RMS 轮询定时器（常驻, 由 isMonitoring 在 tapPoll 内门控）
-    let tapPollBuffer = null;        // RMS 轮询复用缓冲（tap 建立时按 fftSize 分配）
-    let lastLoudTime = 0;            // 最近一次有声时刻
     let tapOrigConnect = null;       // 原始 AudioNode.connect
     const tapMuteGains = new Map();  // 主动捕获的静音增益节点 (context -> GainNode[gain=0])
     const TAP_RMS_THRESHOLD = 0.01;  // 有声判定阈值
@@ -1600,17 +1600,17 @@
                 try {
                     if (isMonitoring && destination instanceof AudioDestinationNode &&
                         !TAP_OWN_NODES.has(this)) {
-                        // 首次见到该扬声器: 建立 tap 基础设施
+                        // 首次见到该扬声器: 建立(该 Context 的) tap 基础设施
                         if (!TAPPED_DESTINATIONS.has(destination)) {
                             TAPPED_DESTINATIONS.add(destination);
                             startTapMonitoring(destination.context);
                         }
                         // 把音源接入录制目标与分析器 (不接则录到的是空流)
-                        if (tapDestNode && this.context === tapDestNode.context &&
-                            !TAP_SEEN_SOURCES.has(this)) {
+                        const sess = tapSessions.get(destination.context);
+                        if (sess && !TAP_SEEN_SOURCES.has(this)) {
                             TAP_SEEN_SOURCES.add(this);
-                            tapOrigConnect.call(this, tapDestNode);
-                            tapOrigConnect.call(this, tapAnalyser);
+                            tapOrigConnect.call(this, sess.destNode);
+                            tapOrigConnect.call(this, sess.analyser);
                         }
                     }
                     // 主动捕获模式: 把音源到扬声器的连接重定向到静音增益节点,
@@ -1639,24 +1639,28 @@
         }
     }
 
-    // 建立 tap 基础设施（分析器 + 录制目标）并开始 RMS 轮询
+    // 建立某个 Context 的 tap 基础设施（分析器 + 录制目标）并预启动录制
     // 录制器在此刻(静音期)立即启动 —— 若等检测到有声再开录, 启动延迟会吃掉首音节
     // (实测症状: "长城"听到"…城"), 先录后裁即可完整保留语音起始
-    // 已知限制: 仅为首个出现的扬声器上下文建 tap; 页面更换 AudioContext 后的音源不会被录制
     function startTapMonitoring(ctx) {
         try {
-            if (tapDestNode) return; // 已建立
+            if (tapSessions.has(ctx)) return; // 该 Context 已建立
             const destNode = ctx.createMediaStreamDestination();
             TAP_OWN_NODES.add(destNode);
             const analyser = ctx.createAnalyser();
             analyser.fftSize = 1024;
             TAP_OWN_NODES.add(analyser);
-            tapDestNode = destNode; // 基础设施就绪后才对外可见, 失败则下次可重试
-            tapAnalyser = analyser;
-            tapPollBuffer = new Float32Array(analyser.fftSize);
-            lastLoudTime = 0;
-            tapPollTimer = setInterval(tapPoll, TAP_POLL_INTERVAL);
-            startTapRecorder(); // 预启动: 在静音期把录制器准备好
+            const sess = {
+                destNode: destNode, // 基础设施就绪后才对外可见, 失败则下次可重试
+                analyser: analyser,
+                pollBuffer: new Float32Array(analyser.fftSize),
+                recorder: null,
+                chunks: null,
+                lastLoudTime: 0
+            };
+            tapSessions.set(ctx, sess);
+            if (!tapPollTimer) tapPollTimer = setInterval(tapPoll, TAP_POLL_INTERVAL);
+            startTapRecorder(sess); // 预启动: 在静音期把录制器准备好
             console.log('Web Audio 播放捕获 (tap) 已建立, 等待有声输入');
         } catch (e) {
             console.error('建立 Web Audio 播放捕获失败:', e);
@@ -1667,76 +1671,86 @@
     // 轮询常驻, 仅在监控开启时工作 —— 这样"停止再恢复监控"无需重建任何基础设施
     function tapPoll() {
         try {
-            if (!isMonitoring || !tapAnalyser) return;
-            const buf = tapPollBuffer;
-            if (tapAnalyser.getFloatTimeDomainData) {
-                tapAnalyser.getFloatTimeDomainData(buf);
-            } else {
-                const bytes = new Uint8Array(buf.length);
-                tapAnalyser.getByteTimeDomainData(bytes);
-                for (let i = 0; i < bytes.length; i++) buf[i] = (bytes[i] - 128) / 128;
-            }
-            let sum = 0;
-            for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-            const rms = Math.sqrt(sum / buf.length);
+            if (!isMonitoring) return;
             const now = Date.now();
-            if (rms >= TAP_RMS_THRESHOLD) {
-                lastLoudTime = now;
-                // 兜底: 停止→恢复监控等场景下录制器可能未运行, 此时开录(起振可能略有损失)
-                if (!tapRecorder) startTapRecorder();
-            }
-            if (tapRecorder && lastLoudTime && now - lastLoudTime > TAP_SILENCE_MS) {
-                lastLoudTime = 0; // 防止 stop 异步生效期间重复触发
-                stopTapRecording(); // 结束当前一段（finalize 后会在静音期内立即重开录制）
-            }
+            tapSessions.forEach((sess, ctx) => {
+                // 页面播放结束会关闭 AudioContext: 必须先收尾本段录制再清理会话,
+                // 否则已录好的音频被直接丢弃(豆包每段朗读结束即关闭 Context, 这是主要切段时机)
+                if (ctx.state === 'closed') {
+                    stopTapRecording(sess);
+                    tapSessions.delete(ctx);
+                    return;
+                }
+                if (!sess.analyser) return;
+                const buf = sess.pollBuffer;
+                if (sess.analyser.getFloatTimeDomainData) {
+                    sess.analyser.getFloatTimeDomainData(buf);
+                } else {
+                    const bytes = new Uint8Array(buf.length);
+                    sess.analyser.getByteTimeDomainData(bytes);
+                    for (let i = 0; i < bytes.length; i++) buf[i] = (bytes[i] - 128) / 128;
+                }
+                let sum = 0;
+                for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+                const rms = Math.sqrt(sum / buf.length);
+                if (rms >= TAP_RMS_THRESHOLD) {
+                    sess.lastLoudTime = now;
+                    // 兜底: 停止→恢复监控等场景下录制器可能未运行, 此时开录(起振可能略有损失)
+                    if (!sess.recorder) startTapRecorder(sess);
+                }
+                if (sess.recorder && sess.lastLoudTime && now - sess.lastLoudTime > TAP_SILENCE_MS) {
+                    sess.lastLoudTime = 0; // 防止 stop 异步生效期间重复触发
+                    stopTapRecording(sess); // 结束当前一段（finalize 后会在静音期内立即重开录制）
+                }
+            });
         } catch (e) {
             console.error('Web Audio tap 轮询出错:', e);
         }
     }
 
     // 开始一段录制
-    function startTapRecorder() {
+    function startTapRecorder(sess) {
         try {
-            if (tapRecorder) return;
-            tapRecorderChunks = [];
+            if (sess.recorder) return;
+            sess.chunks = [];
             const mime = MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
                 ? 'audio/webm;codecs=opus' : '';
-            tapRecorder = mime ? new MediaRecorder(tapDestNode.stream, { mimeType: mime })
-                               : new MediaRecorder(tapDestNode.stream);
-            tapRecorder.ondataavailable = (ev) => {
-                if (ev.data && ev.data.size > 0) tapRecorderChunks.push(ev.data);
+            sess.recorder = mime ? new MediaRecorder(sess.destNode.stream, { mimeType: mime })
+                                 : new MediaRecorder(sess.destNode.stream);
+            sess.recorder.ondataavailable = (ev) => {
+                if (ev.data && ev.data.size > 0) sess.chunks.push(ev.data);
             };
-            tapRecorder.onstop = () => {
-                const chunks = tapRecorderChunks;
-                tapRecorderChunks = null;
-                tapRecorder = null;
-                finalizeTapRecording(chunks);
+            sess.recorder.onstop = () => {
+                const chunks = sess.chunks;
+                sess.chunks = null;
+                sess.recorder = null;
+                finalizeTapRecording(sess, chunks);
             };
-            tapRecorder.start(1000);
+            sess.recorder.start(1000);
             console.log('开始捕获一段 Web Audio 播放');
         } catch (e) {
             console.error('启动 Web Audio 播放捕获失败:', e);
-            tapRecorder = null;
-            tapRecorderChunks = null;
+            sess.recorder = null;
+            sess.chunks = null;
         }
     }
 
     // 结束当前一段录制（触发 finalize）
-    function stopTapRecording() {
-        if (tapRecorder && tapRecorder.state !== 'inactive') {
-            try { tapRecorder.stop(); } catch (e) { /* 忽略 */ }
+    function stopTapRecording(sess) {
+        if (sess.recorder && sess.recorder.state !== 'inactive') {
+            try { sess.recorder.stop(); } catch (e) { /* 忽略 */ }
         }
     }
 
-    // 停止 tap 的录制活动（stopMonitoring 收尾用）
+    // 停止所有 tap 的录制活动（stopMonitoring 收尾用）
     // 轮询定时器保持运行（tapPoll 内由 isMonitoring 门控）, 恢复监控即自动恢复捕获
     function stopTapMonitoring() {
-        stopTapRecording(); // 触发最后一段收尾
+        tapSessions.forEach((sess) => stopTapRecording(sess)); // 触发各会话最后一段收尾
     }
 
     // 录制结束: webm → decodeAudioData → 裁剪首尾静音 → WAV → 进入捕获列表
     // 注意: 不检查 isMonitoring, 因为 stopMonitoring 时最后一段仍需收尾。
-    async function finalizeTapRecording(chunks) {
+    async function finalizeTapRecording(sess, chunks) {
         if (!chunks || chunks.length === 0) return;
         const totalSize = chunks.reduce((s, c) => s + c.size, 0);
         if (totalSize === 0) return;
@@ -1755,7 +1769,7 @@
             console.error('转换 Web Audio 播放捕获失败:', e);
         }
         // 立即重开录制: 此刻仍处于静音期, 下一段语音的起始不会丢失
-        if (isMonitoring && tapDestNode) startTapRecorder();
+        if (isMonitoring && sess.destNode && sess.destNode.context.state !== 'closed') startTapRecorder(sess);
     }
 
     // 裁剪 AudioBuffer 首尾静音 (保留 150ms 余量)

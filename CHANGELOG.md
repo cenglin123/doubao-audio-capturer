@@ -27,6 +27,12 @@
 #### 变更内容
 - 用户反馈捕获的音频开头少一小段(如『长城』听到『…城』)。原因: 录制器在 RMS 检测到有声后才启动, 轮询间隔+录制器启动延迟吃掉首音节起振(用户提供的样本证实: 文件从第 0 秒就是满幅语音, 起始部分根本没录进来)。修复: 1) 录制器改为 tap 建立时(静音期)立即预启动, 切段后在静音期内立即重开, 语音起始永远落在已录状态; 2) 新增 trimAudioBufferSilence, 解码后按 20ms 窗 RMS 裁剪首尾静音保留 150ms 余量; 3) 修复评审发现的回归: 停止再恢复监控后录制器不重启(startMonitoring 补启 + 轮询兜底)。浏览器实测: 录制预启动后语音延后 1.5s 开始, 产出条目起振完整且带 150ms 前置余量。
 
+### 修复第二个音频无法捕获: tap 会话按 AudioContext 隔离 + Context 关闭时收尾录制 (v2.1.2)
+
+#### 变更内容
+- 用户反馈『自动获取过一次后, 手动获取再播放音频数量不增加, 只能获取第一个』。通过在自动化 Chrome 中注入脚本并加调试探针实测定位到两个根因: 1) 豆包每段朗读会新建 AudioContext, 而 tap 状态是全局单例(tapDestNode/tapAnalyser), 第二个 Context 的音源因 context 不匹配被跳过, 分析器读不到声音; 2) 豆包在每段朗读结束后会关闭 AudioContext, 而轮询遇到 closed 状态只是删除会话、没有收尾 MediaRecorder, 已录好的音频被整体丢弃(录制器还挂在死流上)。修复: tap 状态改为 per-AudioContext 会话表(tapSessions Map, 各会话独立的 destNode/analyser/recorder/chunks/lastLoudTime), Context 关闭时先 stopTapRecording 触发 finalize 产出条目再删除会话。真实页面实测: 连续两次朗读计数 1→2, 各产出独立 WAV(1898KB/1660KB); 自动合并下载 MP3 20.74s(两段之和), 起始静音 0.18s、首音节起振完整。
+
+
 
 
 
