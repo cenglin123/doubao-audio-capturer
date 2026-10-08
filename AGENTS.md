@@ -1,21 +1,12 @@
 # AI 协作规范
 
-<!-- AGENTS.md 是主副本。编辑后运行：python scripts/agent_links.py repair -->
 > 本文件会被 AI 框架自动加载并始终驻留在上下文中，因此必须保持精简。
 > 只放行为规则和信息指针，不放可从代码或其他文档获取的事实描述。
+> 本文件是 AI 协作文档的唯一入口（2026-10-08 起退役 CLAUDE.md / GEMINI.md 同步副本与 agent_links.py，见 CHANGELOG）。
 
 ## 项目概述
 
 豆包音频下载助手 —— Tampermonkey 用户脚本，捕获豆包网页版 (doubao.com) 中的 TTS 音频数据。单文件 userscript，无构建系统，通过 GitHub raw URL 分发。
-
-## 同步声明
-
-`AGENTS.md`、`CLAUDE.md`、`GEMINI.md` 内容必须保持一致；读取时选择其一即可。**只编辑 AGENTS.md**，另两个由脚本同步。
-
-- 检查：`python scripts/agent_links.py check`
-- 修复：`python scripts/agent_links.py repair`
-
-本项目使用 copy 模式。
 
 ## 信息导航
 
@@ -37,7 +28,6 @@
 ### 硬约束（不可违反）
 
 - **不碰构建产物**：本项目无构建产物目录，userscript 直接通过 GitHub raw URL 分发。
-- **不绕过 hook**：项目启用了 `.githooks/pre-commit`，lint 失败先修复再提交，不要用 `--no-verify` 跳过。
 - **完工必检**：任务完成后必须执行末尾的"完工检查清单"，不可跳过，不可先回复用户再补。
 - **不修改许可证**：LICENSE 文件不可更改（MIT）。
 
@@ -101,5 +91,4 @@
 - [ ] **验证**：改动是否仍能正常工作？在 Tampermonkey 中确认脚本加载无误，无 JS 语法错误。
 - [ ] **复查视角**：如果这是高风险或跨模块任务，是否至少经过一次新的 reviewer 视角复查？
 - [ ] **CHANGELOG.md**：是否值得记录？如是，用 `python scripts/changelog.py add ...` 插入。
-- [ ] **同步一致性**：本文件若被编辑，运行 `python scripts/agent_links.py check` 后再 repair。
 - [ ] **跳过条件**：纯格式修改、注释修改、同一会话内已记录的变更，可跳过文档更新步骤（但验证步骤不可跳过）。

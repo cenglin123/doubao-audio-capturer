@@ -32,6 +32,12 @@
 #### 变更内容
 - 用户反馈『自动获取过一次后, 手动获取再播放音频数量不增加, 只能获取第一个』。通过在自动化 Chrome 中注入脚本并加调试探针实测定位到两个根因: 1) 豆包每段朗读会新建 AudioContext, 而 tap 状态是全局单例(tapDestNode/tapAnalyser), 第二个 Context 的音源因 context 不匹配被跳过, 分析器读不到声音; 2) 豆包在每段朗读结束后会关闭 AudioContext, 而轮询遇到 closed 状态只是删除会话、没有收尾 MediaRecorder, 已录好的音频被整体丢弃(录制器还挂在死流上)。修复: tap 状态改为 per-AudioContext 会话表(tapSessions Map, 各会话独立的 destNode/analyser/recorder/chunks/lastLoudTime), Context 关闭时先 stopTapRecording 触发 finalize 产出条目再删除会话。真实页面实测: 连续两次朗读计数 1→2, 各产出独立 WAV(1898KB/1660KB); 自动合并下载 MP3 20.74s(两段之和), 起始静音 0.18s、首音节起振完整。
 
+### 退役三文件同步体系, AGENTS.md 成为唯一 AI 协作入口
+
+#### 变更内容
+- 按 init-agent-docs 最新约定(AGENTS.md 单一入口), 删除 CLAUDE.md / GEMINI.md 同步副本、scripts/agent_links.py 与 .githooks/pre-commit(其唯一职责就是同步检查), 并清理 AGENTS.md / docs/audit-checklist.md / docs/initialization.md 中的相关引用。同时合并 PR #4(agent_links.py 的 MD5→SHA256, 合并后该脚本随即退役)。CLAUDE/GEMINI 与 AGENTS 内容完全一致, 无需整合。
+
+
 
 
 

@@ -77,3 +77,9 @@ Subagent 只读 AGENTS.md，回答四个问题全部正确：
 ## 完成时间
 
 2026-06-19
+
+## 2026-10-08 迁移注记
+
+> 本文件以上内容为 2026-06-19 初始化时的历史记录，其中关于 CLAUDE.md / GEMINI.md 同步副本与 agent_links.py 的指引已过时。
+
+按 init-agent-docs 最新约定（AGENTS.md 单一入口），已于 2026-10-08 删除 CLAUDE.md / GEMINI.md / scripts/agent_links.py / .githooks/pre-commit（同步检查），AGENTS.md 成为唯一 AI 协作入口。详见 CHANGELOG 2026-10-08 条目。

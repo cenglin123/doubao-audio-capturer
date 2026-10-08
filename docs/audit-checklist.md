@@ -9,7 +9,6 @@
 
 - [ ] 死链：AGENTS.md 指针是否仍然有效？
 - [ ] 行数警告：AGENTS.md 超过 200 行？如有内容可下沉，执行下沉。
-- [ ] 同步断裂：运行 `python scripts/agent_links.py repair` 修复。
 - [ ] 出生档案：`docs/initialization.md` 是否存在？缺失则从 git log / 当前状态重建。
 
 ## 2. 关键设计决策仍成立？
@@ -25,7 +24,6 @@
 
 ## 4. 完工
 
-- [ ] 审计期间的修改已通过 `python scripts/agent_links.py check`
 - [ ] 审计结果写入 CHANGELOG
 - [ ] 将审计日期记录到本文件末尾的"审计记录"中
 
