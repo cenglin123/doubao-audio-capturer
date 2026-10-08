@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2026-10-08
+
+### 适配豆包新版 WebSocket 流式 TTS (v2.0.7)
+
+#### 变更内容
+- 问题: issue #3 反馈脚本失效。实测抓包确认, 豆包网页朗读/语音已改为 WebSocket(frontier-audio-web-ws.doubao.com)流式传输 protobuf 封装的 Opus 分片, 经 SAMI WASM 解码器 + AudioWorklet 播放, 音频不再经过 XHR/Fetch/data URL/decodeAudioData, 既有四条捕获路径全部落空。修复: 新增第五条捕获路径 — Web Audio 播放捕获(tap): hook AudioNode.connect, 当页面将节点连到扬声器时用 MediaRecorder 录制播放流, 停止后经 decodeAudioData 转为 16bit PCM WAV 进入统一管线(可合并/下载)。该方案与传输协议无关, 后续豆包再换通道也能捕获。已知限制: 一键获取的元素静音对 Web Audio 播放无效, 主动捕获期间仍能听到声音。
+
+---
+
 ## 2026-06-19
 
 ### 初始化 Agent 文档体系

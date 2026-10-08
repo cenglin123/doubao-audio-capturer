@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         豆包音频下载助手
 // @namespace    http://tampermonkey.net/
-// @version      2.0.6
+// @version      2.0.7
 // @description  捕获豆包网页版中的音频数据，支持主动/被动捕获、自动合并、暗黑模式、可拖拽面板、音频排序管理
 // @author       cenglin123
 // @match        https://www.doubao.com/*
@@ -1170,6 +1170,7 @@
     function stopMonitoring() {
         if (!isMonitoring) return; // 防止重复卸载
         isMonitoring = false;
+        stopTapRecording(); // 收尾播放流捕获的最后一段
         unsafeWindow.XMLHttpRequest = originalXHR;
         unsafeWindow.fetch = originalFetch;
         if (observer) {
@@ -1561,6 +1562,163 @@
             console.error('恢复 Web Audio API hooks 失败:', e);
         }
     }
+
+    // ===== Web Audio 播放捕获（tap）=====
+    // 背景: 豆包新版朗读/语音已改为 WebSocket 流式传输 Opus 分片 + SAMI WASM 解码 + AudioWorklet 播放,
+    // 音频不再经过 XHR/Fetch/data URL/decodeAudioData, 旧捕获路径全部失效。
+    // 方案: hook AudioNode.connect, 当页面把节点连到扬声器(AudioDestinationNode)时,
+    // 用 MediaRecorder 录下播放流, 停止后经 decodeAudioData 转为 WAV 进入统一管线。
+    let tapRecorder = null;          // 当前 MediaRecorder
+    let tapChunks = [];              // 当前录音分片
+    let tapDestNode = null;          // MediaStreamAudioDestinationNode
+    let tapInactivityTimer = null;
+    const TAP_SILENCE_MS = 6000;     // 6秒无新数据则结束当前一段
+    const TAP_OWN_NODES = new WeakSet();   // 标记 tap 自身节点, 防止递归
+    const TAPPED_DESTINATIONS = new WeakSet(); // 已建立 tap 的扬声器节点
+
+    // hook AudioNode.prototype.connect
+    function setupWebAudioTapHooks() {
+        try {
+            if (AudioNode.prototype.__tapHooked) return;
+            const origConnect = AudioNode.prototype.connect;
+            AudioNode.prototype.connect = function(destination, ...rest) {
+                try {
+                    if (isMonitoring && destination instanceof AudioDestinationNode &&
+                        !TAP_OWN_NODES.has(this) && !TAPPED_DESTINATIONS.has(destination)) {
+                        TAPPED_DESTINATIONS.add(destination);
+                        startTapRecording(destination.context);
+                    }
+                } catch (e) {
+                    console.warn('Web Audio tap hook 出错:', e);
+                }
+                return origConnect.apply(this, [destination, ...rest]);
+            };
+            AudioNode.prototype.__tapHooked = true;
+            console.log('Web Audio 播放捕获 (tap) hooks 已设置');
+        } catch (e) {
+            console.error('设置 Web Audio tap hooks 失败:', e);
+        }
+    }
+
+    // 开始录制播放流
+    function startTapRecording(ctx) {
+        try {
+            if (typeof MediaRecorder === 'undefined') return;
+            if (tapRecorder && tapRecorder.state === 'recording') return; // 已在录制
+            tapDestNode = ctx.createMediaStreamDestination();
+            TAP_OWN_NODES.add(tapDestNode);
+            tapChunks = [];
+            const mime = MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                ? 'audio/webm;codecs=opus' : '';
+            tapRecorder = mime ? new MediaRecorder(tapDestNode.stream, { mimeType: mime })
+                               : new MediaRecorder(tapDestNode.stream);
+            tapRecorder.ondataavailable = (ev) => {
+                if (ev.data && ev.data.size > 0) {
+                    tapChunks.push(ev.data);
+                    resetTapInactivityTimer();
+                }
+            };
+            tapRecorder.onstop = finalizeTapRecording;
+            tapRecorder.start(1000); // 每秒产出一个分片, 便于无活动检测
+            console.log('开始捕获 Web Audio 播放流');
+        } catch (e) {
+            console.error('启动 Web Audio 播放捕获失败:', e);
+        }
+    }
+
+    // 重置无活动计时器
+    function resetTapInactivityTimer() {
+        if (tapInactivityTimer) clearTimeout(tapInactivityTimer);
+        tapInactivityTimer = setTimeout(stopTapRecording, TAP_SILENCE_MS);
+    }
+
+    // 停止当前录制（触发 finalize）
+    function stopTapRecording() {
+        if (tapInactivityTimer) {
+            clearTimeout(tapInactivityTimer);
+            tapInactivityTimer = null;
+        }
+        if (tapRecorder && tapRecorder.state !== 'inactive') {
+            try { tapRecorder.stop(); } catch (e) { /* 忽略 */ }
+        }
+    }
+
+    // 录制结束: webm → decodeAudioData → WAV → 进入捕获列表
+    // 注意: 不检查 isMonitoring, 因为 stopMonitoring 时最后一段仍需收尾。
+    async function finalizeTapRecording() {
+        const chunks = tapChunks;
+        tapChunks = [];
+        tapRecorder = null;
+        tapDestNode = null;
+        const totalSize = chunks.reduce((s, c) => s + c.size, 0);
+        if (totalSize === 0) return;
+        try {
+            const blob = new Blob(chunks, { type: chunks[0].type || 'audio/webm' });
+            const arrayBuf = await blob.arrayBuffer();
+            const OAC = unsafeWindow.OfflineAudioContext || unsafeWindow.webkitOfflineAudioContext;
+            const offCtx = new OAC(2, 1, 44100);
+            const audioBuffer = await offCtx.decodeAudioData(arrayBuf);
+            if (!audioBuffer || audioBuffer.duration < 0.2) return;
+            const wavBuffer = encodeWavFromAudioBuffer(audioBuffer);
+            pushWebAudioTapItem(wavBuffer, audioBuffer.duration);
+        } catch (e) {
+            console.error('转换 Web Audio 播放捕获失败:', e);
+        }
+    }
+
+    // AudioBuffer → 16bit PCM WAV
+    function encodeWavFromAudioBuffer(audioBuffer) {
+        const numChannels = Math.min(audioBuffer.numberOfChannels, 2);
+        const sampleRate = audioBuffer.sampleRate;
+        const numFrames = audioBuffer.length;
+        const blockAlign = numChannels * 2;
+        const dataSize = numFrames * blockAlign;
+        const buffer = new ArrayBuffer(44 + dataSize);
+        const view = new DataView(buffer);
+        const writeStr = (offset, str) => {
+            for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+        };
+        writeStr(0, 'RIFF'); view.setUint32(4, 36 + dataSize, true); writeStr(8, 'WAVE');
+        writeStr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+        view.setUint16(22, numChannels, true); view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * blockAlign, true); view.setUint16(32, blockAlign, true);
+        view.setUint16(34, 16, true);
+        writeStr(36, 'data'); view.setUint32(40, dataSize, true);
+        const channels = [];
+        for (let c = 0; c < numChannels; c++) channels.push(audioBuffer.getChannelData(c));
+        let offset = 44;
+        for (let i = 0; i < numFrames; i++) {
+            for (let c = 0; c < numChannels; c++) {
+                let s = Math.max(-1, Math.min(1, channels[c][i]));
+                view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+                offset += 2;
+            }
+        }
+        return buffer;
+    }
+
+    // 将 tap 捕获的 WAV 加入捕获列表（不做 isMonitoring 检查, 由调用方保证时机）
+    function pushWebAudioTapItem(wavBuffer, durationSec) {
+        const blobUrl = URL.createObjectURL(new Blob([wavBuffer], { type: 'audio/wav' }));
+        const audioItem = {
+            id: generateId(),
+            source: 'webAudioTap',
+            url: blobUrl,
+            contentType: 'audio/wav',
+            timestamp: new Date().toISOString(),
+            data: wavBuffer,
+            format: 'wav',
+            size: wavBuffer.byteLength,
+            duration: durationSec ? durationSec.toFixed(1) + 's' : 'unknown'
+        };
+        capturedAudio.push(audioItem);
+        lastAudioCaptureTime = Date.now();
+        updateAudioCount();
+        saveAudioData();
+        updateStatus('🎵 捕获到播放音频: ' + (wavBuffer.byteLength / 1024).toFixed(1) + ' KB (WAV)');
+        resetAutoMergeTimer();
+    }
+
 
     // 从data URL解析
     function downloadFromDataUrl() {
@@ -2492,6 +2650,9 @@
             try {
                 if (audio.data instanceof ArrayBuffer) {
                     resolve(audio.data);
+                } else if (audio.data instanceof Blob) {
+                    // 播放捕获 (tap) 等来源可能携带 Blob
+                    audio.data.arrayBuffer().then(resolve).catch(reject);
                 } else if (audio.source === 'dataUrl') {
                     if (audio.url.startsWith('data:application/octet-stream;base64,') || audio.url.startsWith('data:audio/mpeg;base64,') || audio.url.includes('base64,')) {
                         const base64Data = audio.url.split('base64,')[1];
@@ -2821,6 +2982,9 @@
             // 在脚本初始化时即安装 Web Audio API Hook，避免 race condition。
             // hook 体内部通过 isMonitoring 门控，仅在监控开启时捕获。
             setupWebAudioHooks();
+
+            // 安装 Web Audio 播放捕获 (tap) hook, 适配豆包新版 WebSocket 流式 TTS。
+            setupWebAudioTapHooks();
 
             // 根据当前页面加载状态决定如何初始化
             const initUI = () => {
