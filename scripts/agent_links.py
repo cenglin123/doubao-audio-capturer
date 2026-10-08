@@ -52,7 +52,7 @@ def file_text(path: Path) -> str:
 
 
 def file_md5(path: Path) -> str:
-    return hashlib.md5(path.read_bytes()).hexdigest()
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def describe() -> list[str]:
