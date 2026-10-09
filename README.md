@@ -1,107 +1,45 @@
-# 豆包网页版音频捕获工具
+# 豆包音频下载助手
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/version-2.1.2-blue?style=flat-square)
 ![License](https://img.shields.io/github/license/cenglin123/doubao-audio-capturer?style=flat-square)
 
-一个用于捕获豆包网页版 (doubao.com) 中音频数据的 Tampermonkey/油猴 脚本，支持主动/被动捕获、自动合并、暗黑主题、自定义面板位置等便捷功能。
-
-
-## ✨ 主要功能（v2.0.0）
-
-- 自动拦截并捕获页面中通过 XHR/Fetch 加载的音频资源
-- 支持主动（一键获取）与被动（手动监控）两种捕获模式
-- 自动合并：在最后一次捕获后 5 秒无新音频时自动合并并下载（可开/关）
-- 支持按范围选择并合并多个音频（MP3 直接拼接优化）
-- 支持 Base64 与 data: URL 的识别、处理与下载
-- 支持复制音频的 Base64 内容到剪贴板
-- 支持解析直接的音频 URL 并下载（GM_download）
-- 界面支持暗黑模式、自定义滚动条样式、可拖拽并保存面板位置、可最小化
-- 自动保存捕获音频的元数据，刷新页面后仍可查看已捕获项
-- 支持合并后自动清空列表（可配置）
-- 在主动模式下会尽量静音页面音频并在合并结束后恢复
-- 拥有多个 GM 菜单快捷操作（打开面板、触发一键获取、查看列表等）
+一个用于捕获豆包网页版 (doubao.com) 朗读/语音音频的 Tampermonkey（油猴）脚本，支持一键捕获、按语句自动切段、批量合并下载。
 
 ## 📥 安装
 
-### 方式一：从GreasyFork安装
-- 安装 [Tampermonkey](https://www.tampermonkey.net/) 或其他用户脚本管理器
-- 前往 [GreasyFork页面](https://greasyfork.org/scripts/533430) 安装脚本
+- **Greasy Fork**：[豆包音频下载助手](https://greasyfork.org/scripts/533430)（需先安装 [Tampermonkey](https://www.tampermonkey.net/)）
+- **GitHub**：点击安装 [doubao-audio-capture.user.js](https://github.com/cenglin123/doubao-audio-capturer/raw/refs/heads/main/doubao-audio-capture.user.js)，或从 [Releases](https://github.com/cenglin123/doubao-audio-capturer/releases) 下载
 
-### 方式二：从GitHub安装
-- 安装 Tampermonkey 或其他用户脚本管理器
-- 点击安装 [doubao-audio-capture.user.js](https://github.com/cenglin123/doubao-audio-capturer/raw/refs/heads/main/doubao-audio-capture.user.js) 文件
+## 🚀 使用
 
-## 🚀 快速使用指南
+1. 打开 https://www.doubao.com/ ，页面右下角会出现"豆包音频捕获"面板
+2. 点 **一键获取**（自动播放并静音采集）或 **手动获取**（被动监控），再点消息旁的"朗读"
+3. 播放结束后音频自动进入捕获列表，可单条下载或用 **合并下载** 打包
 
-1. 在浏览器中打开 https://www.doubao.com/
-2. 点击页面右下角出现的“豆包音频捕获”面板（若未出现，可从 Tampermonkey 菜单手动打开）
-3. 选择“一键获取”以主动播放并捕获（会尝试静音页面），或选择“手动获取”来被动监控网络请求
-4. 捕获到音频后可在“已捕获”列表中查看、下载、复制 Base64 或删除
-5. 使用“合并下载”可按范围选择多个音频并合并为一个文件（推荐 MP3）
+## ✨ 功能
 
-## 面板与设置说明
+- **Web Audio 播放捕获**：适配豆包新版流式语音链路（WebSocket + WASM 解码），按语句自动切段
+- **两种捕获模式**：一键获取（静音采集）/ 手动获取（被动监控）
+- **合并下载**：多条音频合并为一个 MP3 或 WAV（WAV 源自动转码 MP3）
+- **自动合并**：捕获停止后 10 秒无新音频时自动合并下载（可关）
+- **界面**：暗黑模式、可拖拽、可最小化、面板位置记忆
 
-- 文件名前缀：可自定义保存的文件名前缀
-- 自动合并：开启后在最后一次捕获后等待 5 秒自动合并并下载
-- 自动清空列表：合并下载完成后自动清空已捕获列表
-- 最小化：将面板最小化以节省屏幕空间
-- 面板拖拽：拖拽后会保存位置信息，下次打开仍会使用上次位置（并会做越界校验）
+## ❓ 常见问题
 
-## 常用 GM 菜单命令
+**捕获不到音频？** 先点"一键获取"或"手动获取"开启监控，再点消息旁的"朗读"。
 
-- 🎵 打开音频捕获工具
-- ▶️ 触发一键获取
-- ⏱️ 触发手动获取
-- 📋 查看已捕获的音频
-- 🔗 合并下载音频
-- 🤖 切换自动合并
-- 📍 重置面板位置
+**合并格式？** 捕获音频为 WAV；选择 MP3 合并时会自动转码。
 
-这些命令可通过 Tampermonkey 菜单快速调用，方便在不同页面或页面未完全渲染时使用。
+**面板位置乱了？** Tampermonkey 菜单 → 重置面板位置。
 
-## 技术实现要点
+## 📜 更新日志
 
-- 拦截 unsafeWindow.XMLHttpRequest 与 unsafeWindow.fetch，用于捕获网络响应中的音频数据
-- 使用 MutationObserver 监听新加入的 audio/video 元素并尝试捕获
-- 对 data: URL 与 Base64 做额外验证（检测音频签名或尝试加载）后再纳入列表
-- MP3 合并采用直接拼接有效 MP3 数据块以提高效率（仅限 MP3）
-- 使用 GM_* API（GM_setValue/GM_getValue/GM_download/G M_xmlhttpRequest）保存元数据与下载
-
-## 常见问题
-
-Q: 为什么有时捕获不到音频？  
-A: 请确保已点击“一键获取”或“手动获取”启动监控；某些音频可能是通过加密或特殊流式协议加载，无法通过简单拦截捕获。
-
-Q: 合并后声音异常怎么办？  
-A: 推荐仅合并 MP3 文件（脚本会尽量跳过非 MP3 文件），WAV 合并目前不在快速拼接范围内，如需更准确的合并请在本地使用专业工具重新处理。
-
-Q: 面板位置异常或超出屏幕怎么办？  
-A: 可通过 GM 菜单选择“重置面板位置”将面板重置到右下角。
-
-## 更新日志
-
-### v2.0.0 (当前)
-- 增加主动/被动捕获模式，支持静音页面进行主动捕获
-- 增加自动合并与自动清空选项，支持合并后自动停止获取
-- 增强 UI：暗黑模式、可拖拽面板、最小化、滚动条样式优化
-- 支持 Base64 处理、复制 Base64、解析 data: URL
-- 改进了初始化逻辑与健壮性，保存面板位置并做越界校验
-
-### v1.0.0
-- 实现基本音频捕获功能、合并与下载、音频列表管理
+见 [CHANGELOG.md](CHANGELOG.md) 与 [GitHub Releases](https://github.com/cenglin123/doubao-audio-capturer/releases)。
 
 ## 免责声明
 
 此脚本仅用于学习、调试与研究用途。请遵守相关法律法规并尊重内容版权。作者对因使用本脚本导致的任何后果不承担责任。
 
-## 贡献
+## 🤖 AI 协作
 
-欢迎提交 Issue 或 Pull Request 来改进此脚本。
-
-## AI Agent 协作
-
-本项目使用 [agent-first 文档体系](AGENTS.md) 支持 AI Agent（如 Claude Code）协作开发。关键文件：
-
-- **[AGENTS.md](AGENTS.md)** — AI 协作规范（行为规则、信息导航、完工检查清单）
-- **[CHANGELOG.md](CHANGELOG.md)** — 变更记录
-- **[docs/CURRENT.md](docs/CURRENT.md)** — 当前任务状态
+本项目使用 [AGENTS.md](AGENTS.md) 定义的 AI 协作规范进行开发，变更记录见 [CHANGELOG.md](CHANGELOG.md)。
